@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MediaPipe Hands Tracker</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="hero">
+        <p class="eyebrow">WebRTC + WebAssembly</p>
+        <h1>MediaPipe Hands Tracker</h1>
+        <p class="subhead">
+          Real-time 21-point hand landmarks in the browser using your webcam.
+        </p>
+      </header>
+
+      <section class="panel">
+        <div class="controls">
+          <button id="startBtn" class="btn btn-primary">Start Camera</button>
+          <button id="stopBtn" class="btn" disabled>Stop</button>
+          <p id="status" class="status" data-state="idle">Idle</p>
+        </div>
+
+        <div class="stage">
+          <video id="webcam" autoplay playsinline muted></video>
+          <canvas id="overlay"></canvas>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
