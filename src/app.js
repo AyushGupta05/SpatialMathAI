@@ -30,6 +30,7 @@ export function bootstrapApp() {
   const transformSnapModeEl = document.querySelector("#transformSnapMode");
   const rotationStepInputEl = document.querySelector("#rotationStepInput");
   const debugStateEl = document.querySelector("#debugState");
+  const intentBadgeEl = document.querySelector("#intentBadge");
   const statusEl = document.querySelector("#status");
 
   const ctx = overlayEl.getContext("2d");
@@ -104,6 +105,11 @@ export function bootstrapApp() {
   function setStatus(msg, state = "ok") {
     statusEl.textContent = msg;
     statusEl.dataset.state = state;
+  }
+
+  function setIntent(msg, state = "idle") {
+    intentBadgeEl.textContent = `Intent: ${msg}`;
+    intentBadgeEl.dataset.state = state;
   }
 
   function drawDebug(hand) {
@@ -242,6 +248,16 @@ export function bootstrapApp() {
       const interaction = pipeline.update(handA, handB);
       appState.interaction = interaction;
 
+      if (!interaction.handsDetected) {
+        setIntent("waiting for hands", "idle");
+      } else if (interaction.pinch && gestureModeEl.value === "spawn") {
+        setIntent("placing shape", "ok");
+      } else if (interaction.pinch && gestureModeEl.value === "transform") {
+        setIntent(transformLocked ? "transform lock active" : "acquiring transform lock", "ok");
+      } else {
+        setIntent(gestureModeEl.value === "transform" ? "hovering for selection" : "ready to place", "idle");
+      }
+
       const dynamicAlpha = Math.max(0.16, Math.min(0.62, 0.55 - interaction.jitter * 2.2));
       pipeline.setAlpha(dynamicAlpha);
 
@@ -335,6 +351,7 @@ export function bootstrapApp() {
     startBtn.disabled = false;
     stopBtn.disabled = true;
     setStatus("Stopped", "idle");
+    setIntent("stopped", "idle");
   }
 
   smoothingInputEl.addEventListener("input", () => {
@@ -394,4 +411,5 @@ export function bootstrapApp() {
 
   refreshDebug();
   setStatus("Ready. Start camera to begin.", "idle");
+  setIntent("ready", "idle");
 }
