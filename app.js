@@ -35,6 +35,8 @@ let selectedShape = null;
 let isTransformPinching = false;
 let prevPinch = false;
 let smoothedCursorWorld = null;
+let scaleAnchorDist = null;
+let scaleAnchorValue = 1;
 const maxShapes = 300;
 const placedShapes = [];
 
@@ -235,6 +237,15 @@ function isFist(hand) {
   return meanDist < 0.18;
 }
 
+function handSpread(hand) {
+  const a = hand[8]; // index tip
+  const b = hand[12]; // middle tip
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  const dz = a.z - b.z;
+  return Math.sqrt(dx * dx + dy * dy + dz * dz);
+}
+
 function buildGeometry(type, size) {
   switch (type) {
     case "cuboid": return new THREE.BoxGeometry(size * 1.6, size, size * 0.9);
@@ -389,13 +400,27 @@ function processGestures(results) {
     if (pinchStart) {
       setSelection(pickNearestShape(worldPoint));
       isTransformPinching = true;
+      scaleAnchorDist = handSpread(hand);
+      scaleAnchorValue = selectedShape ? selectedShape.scale.x : 1;
     }
     if (pinching && selectedShape && isTransformPinching) {
       const targetY = selectedShape.position.y;
       selectedShape.position.lerp(new THREE.Vector3(worldPoint.x, targetY, worldPoint.z), 0.35);
-      setStatus("Transform mode: moving selected shape", "ok");
+
+      const spread = handSpread(hand);
+      if (scaleAnchorDist && spread > 0.001) {
+        const ratio = spread / scaleAnchorDist;
+        const nextScale = THREE.MathUtils.clamp(scaleAnchorValue * ratio, 0.35, 4.5);
+        selectedShape.scale.setScalar(nextScale);
+        sizeInputEl.value = String(Math.min(2.5, Math.max(0.2, (selectedShape.userData.baseSize || 1) * nextScale)));
+      }
+
+      setStatus("Transform mode: move + scale with hand spread", "ok");
     }
-    if (pinchEnd) isTransformPinching = false;
+    if (pinchEnd) {
+      isTransformPinching = false;
+      scaleAnchorDist = null;
+    }
   }
 
   prevPinch = pinching;
