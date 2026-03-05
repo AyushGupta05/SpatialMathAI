@@ -27,6 +27,8 @@ export function bootstrapApp() {
   const calibrateBtn = document.querySelector("#calibrateBtn");
   const snapToggleEl = document.querySelector("#snapToggle");
   const gridStepInputEl = document.querySelector("#gridStepInput");
+  const transformSnapModeEl = document.querySelector("#transformSnapMode");
+  const rotationStepInputEl = document.querySelector("#rotationStepInput");
   const debugStateEl = document.querySelector("#debugState");
   const statusEl = document.querySelector("#status");
 
@@ -71,6 +73,21 @@ export function bootstrapApp() {
     return Math.round(v / step) * step;
   }
 
+  function shouldSnapPosition() {
+    return transformSnapModeEl.value === "position" || transformSnapModeEl.value === "all";
+  }
+
+  function shouldSnapRotation() {
+    return transformSnapModeEl.value === "rotation" || transformSnapModeEl.value === "all";
+  }
+
+  function snapRotation(rad) {
+    if (!shouldSnapRotation()) return rad;
+    const stepDeg = Number(rotationStepInputEl.value || 15);
+    const step = (Math.PI / 180) * stepDeg;
+    return Math.round(rad / step) * step;
+  }
+
   function pickNearestMesh(hitPoint, maxDist = 1.5) {
     let best = null;
     let dist = Infinity;
@@ -106,7 +123,12 @@ export function bootstrapApp() {
     debugStateEl.textContent = JSON.stringify({
       interaction: appState.interaction,
       calibration: appState.calibration,
-      snap: { enabled: snapToggleEl.value === "on", step: Number(gridStepInputEl.value) },
+      snap: {
+        enabled: snapToggleEl.value === "on",
+        step: Number(gridStepInputEl.value),
+        transformMode: transformSnapModeEl.value,
+        rotationStepDeg: Number(rotationStepInputEl.value),
+      },
       shape: appState.shape,
       dimension: Number(appState.dimension.toFixed(3)),
       volume: Number(appState.volume.toFixed(3)),
@@ -229,9 +251,9 @@ export function bootstrapApp() {
 
         if (pinchStart && hit && gestureModeEl.value === "spawn") {
           const mesh = world.buildMesh(shapeTypeEl.value, Number(sizeInputEl.value), colorInputEl.value);
-          mesh.position.x = snapValue(hit.x);
-          mesh.position.z = snapValue(hit.z);
-          mesh.rotation.y = Math.random() * Math.PI;
+          mesh.position.x = shouldSnapPosition() ? snapValue(hit.x) : hit.x;
+          mesh.position.z = shouldSnapPosition() ? snapValue(hit.z) : hit.z;
+          mesh.rotation.y = snapRotation(Math.random() * Math.PI);
           mesh.userData.shape = shapeTypeEl.value;
           mesh.userData.baseSize = Number(sizeInputEl.value);
           world.scene.add(mesh);
@@ -248,9 +270,9 @@ export function bootstrapApp() {
         }
 
         if (interaction.pinch && activeMesh && hit && gestureModeEl.value === "transform") {
-          activeMesh.position.x = snapValue(hit.x);
-          activeMesh.position.z = snapValue(hit.z);
-          activeMesh.rotation.y = interaction.rotation;
+          activeMesh.position.x = shouldSnapPosition() ? snapValue(hit.x) : hit.x;
+          activeMesh.position.z = shouldSnapPosition() ? snapValue(hit.z) : hit.z;
+          activeMesh.rotation.y = snapRotation(interaction.rotation);
 
           const calibratedScale = appState.calibration.scaleK || 1;
           const twoHand = interaction.twoHandBoost == null ? 1 : (0.85 + interaction.twoHandBoost * 0.7);
@@ -333,6 +355,11 @@ export function bootstrapApp() {
     setStatus(`Tracking profile: ${profile}`, "ok");
     refreshDebug();
   });
+
+  transformSnapModeEl.addEventListener("change", refreshDebug);
+  rotationStepInputEl.addEventListener("input", refreshDebug);
+  snapToggleEl.addEventListener("change", refreshDebug);
+  gridStepInputEl.addEventListener("input", refreshDebug);
 
   calibrateBtn.addEventListener("click", () => {
     const reference = appState.interaction.wristToIndex || appState.calibration.baselineDistance;
