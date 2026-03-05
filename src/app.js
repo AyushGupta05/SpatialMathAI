@@ -216,19 +216,25 @@ export function bootstrapApp() {
     ctx.clearRect(0, 0, overlayEl.width, overlayEl.height);
     if (!hands?.length) return;
 
-    const colors = ["#66ffe3", "#7fb7ff"];
+    const colors = ["#ffb86b", "#8ec5ff"];
+    const t = performance.now() * 0.004;
 
-    ctx.globalCompositeOperation = "screen";
+    ctx.globalCompositeOperation = "source-over";
 
     hands.forEach((hand, i) => {
       const color = colors[i % colors.length];
       const isPrimary = hand === primaryHand;
-      ctx.strokeStyle = color;
-      ctx.fillStyle = color;
-      ctx.lineWidth = isPrimary ? 2.2 : 1.6;
-      ctx.globalAlpha = isPrimary ? 0.95 : 0.6;
-      ctx.shadowBlur = isPrimary ? 16 : 8;
+      ctx.lineWidth = isPrimary ? 2.4 : 1.6;
+      ctx.globalAlpha = isPrimary ? 0.72 : 0.45;
+      ctx.shadowBlur = isPrimary ? 6 : 2;
       ctx.shadowColor = color;
+      ctx.setLineDash(isPrimary ? [6, 7] : [3, 8]);
+      ctx.lineDashOffset = -t * (isPrimary ? 20 : 10);
+
+      const grad = ctx.createLinearGradient(0, 0, overlayEl.width, overlayEl.height);
+      grad.addColorStop(0, color);
+      grad.addColorStop(1, "rgba(255,255,255,0.15)");
+      ctx.strokeStyle = grad;
 
       for (const [a, b] of HAND_CONNECTIONS) {
         const p1 = hand[a];
@@ -239,28 +245,37 @@ export function bootstrapApp() {
         ctx.stroke();
       }
 
-      hand.forEach((pt, idx) => {
-        const x = (1 - pt.x) * overlayEl.width;
-        const y = pt.y * overlayEl.height;
-        ctx.beginPath();
-        ctx.arc(x, y, idx === 0 ? 6.0 : (isPrimary ? 3.4 : 2.6), 0, Math.PI * 2);
-        ctx.fill();
-      });
-
-      // subtle palm aura (cool visual, low opacity so it doesn't block scene)
+      // soft ribbon through palm center
       const palm = palmCenterLandmark(hand);
       if (palm) {
         const px = (1 - palm.x) * overlayEl.width;
         const py = palm.y * overlayEl.height;
-        const aura = 18 + (interaction?.pinchStrength || 0) * 14;
+        const aura = 16 + (interaction?.pinchStrength || 0) * 10;
         const g = ctx.createRadialGradient(px, py, 2, px, py, aura);
-        g.addColorStop(0, isPrimary ? "rgba(130,255,230,0.28)" : "rgba(127,183,255,0.2)");
+        g.addColorStop(0, isPrimary ? "rgba(255,184,107,0.22)" : "rgba(142,197,255,0.18)");
         g.addColorStop(1, "rgba(0,0,0,0)");
         ctx.fillStyle = g;
         ctx.beginPath();
         ctx.arc(px, py, aura, 0, Math.PI * 2);
         ctx.fill();
-        ctx.fillStyle = color;
+
+        const wrist = hand[0];
+        const indexBase = hand[5];
+        const pinkyBase = hand[17];
+        if (wrist && indexBase && pinkyBase) {
+          const wx = (1 - wrist.x) * overlayEl.width;
+          const wy = wrist.y * overlayEl.height;
+          const ix = (1 - indexBase.x) * overlayEl.width;
+          const iy = indexBase.y * overlayEl.height;
+          const px2 = (1 - pinkyBase.x) * overlayEl.width;
+          const py2 = pinkyBase.y * overlayEl.height;
+          ctx.beginPath();
+          ctx.lineWidth = isPrimary ? 3.2 : 2.2;
+          ctx.strokeStyle = isPrimary ? "rgba(255,233,206,0.6)" : "rgba(215,233,255,0.45)";
+          ctx.moveTo(ix, iy);
+          ctx.quadraticCurveTo(wx, wy, px2, py2);
+          ctx.stroke();
+        }
       }
 
       if (isPrimary) {
@@ -268,11 +283,13 @@ export function bootstrapApp() {
         const contactX = (1 - contact.x) * overlayEl.width;
         const contactY = contact.y * overlayEl.height;
         const pulse = pinchPulseRadius(interaction?.pinchStrength || 0);
-        ctx.globalAlpha = 0.95;
+        ctx.globalAlpha = 0.9;
+        ctx.setLineDash([]);
         drawPlacementReticle(contactX, contactY, pulse);
       }
     });
 
+    ctx.setLineDash([]);
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
     ctx.shadowBlur = 0;
