@@ -4,6 +4,7 @@ import { InteractionPipeline } from "./signals/interactionPipeline.js";
 import { appState } from "./state/store.js";
 import { createWorld } from "./render/world.js";
 import { FilesetResolver, HandLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest";
+import * as THREE from "three";
 
 const MODEL_PATH = new URL("../models/hand_landmarker.task", window.location.href).toString();
 
@@ -28,6 +29,7 @@ export function bootstrapApp() {
   const snapToggleEl = document.querySelector("#snapToggle");
   const gridStepInputEl = document.querySelector("#gridStepInput");
   const transformSnapModeEl = document.querySelector("#transformSnapMode");
+  const transformLockModeEl = document.querySelector("#transformLockMode");
   const rotationStepInputEl = document.querySelector("#rotationStepInput");
   const debugStateEl = document.querySelector("#debugState");
   const intentBadgeEl = document.querySelector("#intentBadge");
@@ -54,7 +56,9 @@ export function bootstrapApp() {
   const MAX_MESHES = 220;
 
   const selectionRing = world.createSelectionRing();
+  const rotationGuide = world.createRotationGuide();
   world.scene.add(selectionRing);
+  world.scene.add(rotationGuide);
 
   function setActiveMesh(mesh) {
     if (activeMesh === mesh) return;
@@ -63,10 +67,13 @@ export function bootstrapApp() {
     if (activeMesh?.material?.emissive) activeMesh.material.emissive.setHex(0x113333);
     if (!activeMesh) {
       selectionRing.visible = false;
+      rotationGuide.visible = false;
       return;
     }
     selectionRing.visible = true;
     selectionRing.position.set(activeMesh.position.x, 0.02, activeMesh.position.z);
+    rotationGuide.visible = true;
+    rotationGuide.position.set(activeMesh.position.x, 0.05, activeMesh.position.z);
   }
 
   function snapValue(v) {
@@ -135,6 +142,7 @@ export function bootstrapApp() {
         step: Number(gridStepInputEl.value),
         transformMode: transformSnapModeEl.value,
         rotationStepDeg: Number(rotationStepInputEl.value),
+        lockMode: transformLockModeEl.value,
       },
       shape: appState.shape,
       dimension: Number(appState.dimension.toFixed(3)),
@@ -299,6 +307,8 @@ export function bootstrapApp() {
           activeMesh.position.x = shouldSnapPosition() ? snapValue(hit.x) : hit.x;
           activeMesh.position.z = shouldSnapPosition() ? snapValue(hit.z) : hit.z;
           activeMesh.rotation.y = snapRotation(interaction.rotation);
+          rotationGuide.setDirection(new THREE.Vector3(Math.cos(activeMesh.rotation.y), 0, Math.sin(activeMesh.rotation.y)).normalize());
+          rotationGuide.position.set(activeMesh.position.x, 0.05, activeMesh.position.z);
 
           const calibratedScale = appState.calibration.scaleK || 1;
           const twoHand = interaction.twoHandBoost == null ? 1 : (0.85 + interaction.twoHandBoost * 0.7);
@@ -323,9 +333,13 @@ export function bootstrapApp() {
         }
 
         if (!interaction.pinch && prevPinch && transformLocked) {
-          transformLocked = false;
+          transformLocked = transformLockModeEl.value === "sticky";
           prevTwoHandAngle = null;
-          setStatus("Transform released", "idle");
+          if (!transformLocked) {
+            setStatus("Transform released", "idle");
+          } else {
+            setStatus("Transform sticky-lock maintained", "ok");
+          }
         }
 
         prevPinch = interaction.pinch;
@@ -392,6 +406,7 @@ export function bootstrapApp() {
   });
 
   transformSnapModeEl.addEventListener("change", refreshDebug);
+  transformLockModeEl.addEventListener("change", refreshDebug);
   rotationStepInputEl.addEventListener("input", refreshDebug);
   snapToggleEl.addEventListener("change", refreshDebug);
   gridStepInputEl.addEventListener("input", refreshDebug);

@@ -78,6 +78,14 @@ export function createWorld(container) {
     return ring;
   }
 
+  function createRotationGuide() {
+    const dir = new THREE.Vector3(1, 0, 0);
+    const origin = new THREE.Vector3(0, 0.05, 0);
+    const arrow = new THREE.ArrowHelper(dir, origin, 0.9, 0xffd166, 0.18, 0.11);
+    arrow.visible = false;
+    return arrow;
+  }
+
   function animate() {
     controls.update();
     renderer.render(scene, camera);
@@ -88,5 +96,5 @@ export function createWorld(container) {
   resize();
   animate();
 
-  return { scene, camera, renderer, projectToGround, buildMesh, createSelectionRing };
+  return { scene, camera, renderer, projectToGround, buildMesh, createSelectionRing, createRotationGuide };
 }
