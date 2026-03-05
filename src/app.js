@@ -216,20 +216,18 @@ export function bootstrapApp() {
     ctx.clearRect(0, 0, overlayEl.width, overlayEl.height);
     if (!hands?.length) return;
 
-    const colors = ["#ffb86b", "#8ec5ff"];
-    const t = performance.now() * 0.004;
+    const colors = ["#93ffd8", "#9ec3ff"];
 
     ctx.globalCompositeOperation = "source-over";
 
     hands.forEach((hand, i) => {
       const color = colors[i % colors.length];
       const isPrimary = hand === primaryHand;
-      ctx.lineWidth = isPrimary ? 2.4 : 1.6;
-      ctx.globalAlpha = isPrimary ? 0.72 : 0.45;
-      ctx.shadowBlur = isPrimary ? 6 : 2;
+      ctx.lineWidth = isPrimary ? 2.1 : 1.4;
+      ctx.globalAlpha = isPrimary ? 0.62 : 0.38;
+      ctx.shadowBlur = isPrimary ? 5 : 1;
       ctx.shadowColor = color;
-      ctx.setLineDash(isPrimary ? [6, 7] : [3, 8]);
-      ctx.lineDashOffset = -t * (isPrimary ? 20 : 10);
+      ctx.setLineDash([]);
 
       const grad = ctx.createLinearGradient(0, 0, overlayEl.width, overlayEl.height);
       grad.addColorStop(0, color);
@@ -245,37 +243,19 @@ export function bootstrapApp() {
         ctx.stroke();
       }
 
-      // soft ribbon through palm center
+      // minimal soft palm anchor
       const palm = palmCenterLandmark(hand);
       if (palm) {
         const px = (1 - palm.x) * overlayEl.width;
         const py = palm.y * overlayEl.height;
-        const aura = 16 + (interaction?.pinchStrength || 0) * 10;
+        const aura = 12 + (interaction?.pinchStrength || 0) * 6;
         const g = ctx.createRadialGradient(px, py, 2, px, py, aura);
-        g.addColorStop(0, isPrimary ? "rgba(255,184,107,0.22)" : "rgba(142,197,255,0.18)");
+        g.addColorStop(0, isPrimary ? "rgba(147,255,216,0.18)" : "rgba(158,195,255,0.14)");
         g.addColorStop(1, "rgba(0,0,0,0)");
         ctx.fillStyle = g;
         ctx.beginPath();
         ctx.arc(px, py, aura, 0, Math.PI * 2);
         ctx.fill();
-
-        const wrist = hand[0];
-        const indexBase = hand[5];
-        const pinkyBase = hand[17];
-        if (wrist && indexBase && pinkyBase) {
-          const wx = (1 - wrist.x) * overlayEl.width;
-          const wy = wrist.y * overlayEl.height;
-          const ix = (1 - indexBase.x) * overlayEl.width;
-          const iy = indexBase.y * overlayEl.height;
-          const px2 = (1 - pinkyBase.x) * overlayEl.width;
-          const py2 = pinkyBase.y * overlayEl.height;
-          ctx.beginPath();
-          ctx.lineWidth = isPrimary ? 3.2 : 2.2;
-          ctx.strokeStyle = isPrimary ? "rgba(255,233,206,0.6)" : "rgba(215,233,255,0.45)";
-          ctx.moveTo(ix, iy);
-          ctx.quadraticCurveTo(wx, wy, px2, py2);
-          ctx.stroke();
-        }
       }
 
       if (isPrimary) {

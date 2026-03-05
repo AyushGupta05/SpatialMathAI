@@ -115,7 +115,7 @@ input[type="range"] { width: 100%; }
 #overlay {
   pointer-events: none;
   z-index: 3;
-  opacity: 0.56;
+  opacity: 0.48;
 }
 #worldMount canvas { position: absolute; inset: 0; z-index: 1; }
 #webcam {
