@@ -25,6 +25,9 @@ MediaPipe Hands + Three.js prototype for gesture-based 3D shape creation.
 - Long-session guardrails: mesh budget + auto-pause on hidden tab
 - Sticky transform lock mode + visual rotation guide arrow
 - Calibration presets for desk/room/far camera distance
+- Full hand skeleton debug overlay (not just cursor dot)
+- Palm-proxy in 3D world for spatial intent visualization
+- Control split: palm drives transform movement, fingers drive placement/selection
 
 ## Offline tuning (Python)
 Use `tools/signal_tuner.py` to tune EMA and pinch hysteresis from recorded CSV traces.
