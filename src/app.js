@@ -42,14 +42,25 @@ export function bootstrapApp() {
   let lastInferAt = 0;
   let running = false;
   let prevPinch = false;
+  let prevTwoHandAngle = null;
+  let transformLocked = false;
   let activeMesh = null;
   const placedMeshes = [];
+
+  const selectionRing = world.createSelectionRing();
+  world.scene.add(selectionRing);
 
   function setActiveMesh(mesh) {
     if (activeMesh === mesh) return;
     if (activeMesh?.material?.emissive) activeMesh.material.emissive.setHex(0x000000);
     activeMesh = mesh;
     if (activeMesh?.material?.emissive) activeMesh.material.emissive.setHex(0x113333);
+    if (!activeMesh) {
+      selectionRing.visible = false;
+      return;
+    }
+    selectionRing.visible = true;
+    selectionRing.position.set(activeMesh.position.x, 0.02, activeMesh.position.z);
   }
 
   function snapValue(v) {
@@ -229,6 +240,9 @@ export function bootstrapApp() {
 
         if (pinchStart && hit && gestureModeEl.value === "transform") {
           setActiveMesh(pickNearestMesh(hit));
+          transformLocked = Boolean(activeMesh);
+          prevTwoHandAngle = null;
+          if (transformLocked) setStatus("Transform lock acquired", "ok");
         }
 
         if (interaction.pinch && activeMesh && hit && gestureModeEl.value === "transform") {
@@ -240,7 +254,28 @@ export function bootstrapApp() {
           const twoHand = interaction.twoHandBoost == null ? 1 : (0.85 + interaction.twoHandBoost * 0.7);
           const scale = (0.45 + interaction.resize * 2.4) * calibratedScale * twoHand;
           activeMesh.scale.setScalar(scale);
+
+          if (handB) {
+            const p1 = handA[8];
+            const p2 = handB[8];
+            const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+            if (prevTwoHandAngle != null) {
+              const delta = angle - prevTwoHandAngle;
+              activeMesh.rotation.y += delta * 1.2;
+            }
+            prevTwoHandAngle = angle;
+          } else {
+            prevTwoHandAngle = null;
+          }
+
+          selectionRing.position.set(activeMesh.position.x, 0.02, activeMesh.position.z);
           updateGeometryMetrics(activeMesh.userData.shape || shapeTypeEl.value, Number(sizeInputEl.value) * scale);
+        }
+
+        if (!interaction.pinch && prevPinch && transformLocked) {
+          transformLocked = false;
+          prevTwoHandAngle = null;
+          setStatus("Transform released", "idle");
         }
 
         prevPinch = interaction.pinch;

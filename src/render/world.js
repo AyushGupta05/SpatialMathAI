@@ -68,6 +68,16 @@ export function createWorld(container) {
     return mesh;
   }
 
+  function createSelectionRing() {
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.28, 0.34, 48),
+      new THREE.MeshBasicMaterial({ color: 0x7df9d8, transparent: true, opacity: 0.9, side: THREE.DoubleSide })
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.visible = false;
+    return ring;
+  }
+
   function animate() {
     controls.update();
     renderer.render(scene, camera);
@@ -78,5 +88,5 @@ export function createWorld(container) {
   resize();
   animate();
 
-  return { scene, camera, renderer, projectToGround, buildMesh };
+  return { scene, camera, renderer, projectToGround, buildMesh, createSelectionRing };
 }
