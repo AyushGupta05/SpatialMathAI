@@ -3,8 +3,8 @@ import { clamp, ema, dist3, angle2 } from "../core/math.js";
 export class InteractionPipeline {
   constructor(options = {}) {
     this.alpha = options.alpha ?? 0.38;
-    this.pinchOn = options.pinchOn ?? 0.048;
-    this.pinchOff = options.pinchOff ?? 0.062;
+    this.pinchOn = options.pinchOn ?? 0.055;
+    this.pinchOff = options.pinchOff ?? 0.07;
     this.prevResize = 0;
     this.prevRotation = 0;
     this.prevJitter = 0;
@@ -14,6 +14,7 @@ export class InteractionPipeline {
     this.pinchOffFrames = options.pinchOffFrames ?? 2;
     this._pinchOnCounter = 0;
     this._pinchOffCounter = 0;
+    this.pinchDist = 0;
   }
 
   setAlpha(alpha) {
@@ -63,6 +64,7 @@ export class InteractionPipeline {
     const middle = hand[12];
 
     const pinchDist = dist3(thumb, index);
+    this.pinchDist = pinchDist;
     if (!this.pinch && pinchDist <= this.pinchOn) {
       this._pinchOnCounter += 1;
       this._pinchOffCounter = 0;
@@ -107,6 +109,8 @@ export class InteractionPipeline {
       resize,
       rotation: rot,
       pinch: this.pinch,
+      pinchDist,
+      pinchStrength: clamp((this.pinchOff - pinchDist) / Math.max(0.0001, (this.pinchOff - this.pinchOn)), 0, 1),
       jitter,
       wristToIndex,
       twoHandBoost,

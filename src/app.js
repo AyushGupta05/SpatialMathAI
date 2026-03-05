@@ -12,6 +12,16 @@ const HAND_CONNECTIONS = [
   [9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]
 ];
 
+function pinchDistance(hand) {
+  const a = hand?.[4];
+  const b = hand?.[8];
+  if (!a || !b) return Infinity;
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  const dz = a.z - b.z;
+  return Math.sqrt(dx * dx + dy * dy + dz * dz);
+}
+
 export function bootstrapApp() {
   const webcamEl = document.querySelector("#webcam");
   const overlayEl = document.querySelector("#overlay");
@@ -54,6 +64,8 @@ export function bootstrapApp() {
   let lastInferAt = 0;
   let running = false;
   let prevPinch = false;
+  let pinchConsumed = false;
+  let pinchStableFrames = 0;
   let prevTwoHandAngle = null;
   let transformLocked = false;
   let activeMesh = null;
@@ -133,36 +145,48 @@ export function bootstrapApp() {
     intentBadgeEl.dataset.state = state;
   }
 
-  function drawDebug(hand) {
+  function drawDebug(hands, interaction) {
     ctx.clearRect(0, 0, overlayEl.width, overlayEl.height);
-    if (!hand) return;
+    if (!hands?.length) return;
 
-    ctx.strokeStyle = "#7df9d8";
-    ctx.fillStyle = "#7df9d8";
-    ctx.lineWidth = 2;
+    const colors = ["#7df9d8", "#7cc9ff"];
 
-    for (const [a, b] of HAND_CONNECTIONS) {
-      const p1 = hand[a];
-      const p2 = hand[b];
+    hands.forEach((hand, i) => {
+      const color = colors[i % colors.length];
+      ctx.strokeStyle = color;
+      ctx.fillStyle = color;
+      ctx.lineWidth = 2;
+      ctx.shadowBlur = 12;
+      ctx.shadowColor = color;
+
+      for (const [a, b] of HAND_CONNECTIONS) {
+        const p1 = hand[a];
+        const p2 = hand[b];
+        ctx.beginPath();
+        ctx.moveTo((1 - p1.x) * overlayEl.width, p1.y * overlayEl.height);
+        ctx.lineTo((1 - p2.x) * overlayEl.width, p2.y * overlayEl.height);
+        ctx.stroke();
+      }
+
+      hand.forEach((pt, idx) => {
+        const x = (1 - pt.x) * overlayEl.width;
+        const y = pt.y * overlayEl.height;
+        ctx.beginPath();
+        ctx.arc(x, y, idx === 0 ? 6.5 : 3.0, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      const tip = hand[8];
+      const tipX = (1 - tip.x) * overlayEl.width;
+      const tipY = tip.y * overlayEl.height;
+      const pulse = 8 + ((interaction?.pinchStrength || 0) * 7);
+      ctx.strokeStyle = "#ffd166";
       ctx.beginPath();
-      ctx.moveTo((1 - p1.x) * overlayEl.width, p1.y * overlayEl.height);
-      ctx.lineTo((1 - p2.x) * overlayEl.width, p2.y * overlayEl.height);
+      ctx.arc(tipX, tipY, pulse, 0, Math.PI * 2);
       ctx.stroke();
-    }
-
-    hand.forEach((pt, idx) => {
-      const x = (1 - pt.x) * overlayEl.width;
-      const y = pt.y * overlayEl.height;
-      ctx.beginPath();
-      ctx.arc(x, y, idx === 0 ? 6.5 : 3.2, 0, Math.PI * 2);
-      ctx.fill();
     });
 
-    const tip = hand[8];
-    ctx.strokeStyle = "#ffd166";
-    ctx.beginPath();
-    ctx.arc((1 - tip.x) * overlayEl.width, tip.y * overlayEl.height, 9, 0, Math.PI * 2);
-    ctx.stroke();
+    ctx.shadowBlur = 0;
   }
 
   function refreshDebug() {
@@ -290,11 +314,23 @@ export function bootstrapApp() {
     if (webcamEl.readyState >= 2 && (now - lastInferAt >= minInferMs)) {
       lastInferAt = now;
       const results = handLandmarker.detectForVideo(webcamEl, now);
-      const handA = results?.landmarks?.[0] || null;
-      const handB = results?.landmarks?.[1] || null;
+      const hands = results?.landmarks || [];
+      const handA = hands[0] || null;
+      const handB = hands[1] || null;
 
-      drawDebug(handA);
-      const interaction = pipeline.update(handA, handB);
+      let primary = handA;
+      let secondary = handB;
+      if (handA && handB) {
+        const pa = pinchDistance(handA);
+        const pb = pinchDistance(handB);
+        if (pb < pa) {
+          primary = handB;
+          secondary = handA;
+        }
+      }
+
+      const interaction = pipeline.update(primary, secondary);
+      drawDebug(hands, interaction);
       appState.interaction = interaction;
 
       if (!interaction.handsDetected) {
@@ -310,9 +346,9 @@ export function bootstrapApp() {
       const dynamicAlpha = Math.max(0.16, Math.min(0.62, 0.55 - interaction.jitter * 2.2));
       pipeline.setAlpha(dynamicAlpha);
 
-      if (handA) {
-        const palmHit = world.projectToGround(handA[0]);
-        const fingerHit = world.projectToGround(handA[8]);
+      if (primary) {
+        const palmHit = world.projectToGround(primary[0]);
+        const fingerHit = world.projectToGround(primary[8]);
 
         if (palmHit) {
           palmProxy.visible = true;
@@ -321,9 +357,13 @@ export function bootstrapApp() {
           palmProxy.visible = false;
         }
 
-        const pinchStart = interaction.pinch && !prevPinch;
+        if (interaction.pinch) pinchStableFrames += 1;
+        else pinchStableFrames = 0;
 
-        if (pinchStart && fingerHit && gestureModeEl.value === "spawn") {
+        const pinchStart = interaction.pinch && !prevPinch;
+        const pinchConfirmed = interaction.pinch && pinchStableFrames >= 2;
+
+        if ((pinchStart || (pinchConfirmed && !pinchConsumed)) && fingerHit && gestureModeEl.value === "spawn") {
           const mesh = world.buildMesh(shapeTypeEl.value, Number(sizeInputEl.value), colorInputEl.value);
           mesh.position.x = shouldSnapPosition() ? snapValue(fingerHit.x) : fingerHit.x;
           mesh.position.z = shouldSnapPosition() ? snapValue(fingerHit.z) : fingerHit.z;
@@ -335,6 +375,7 @@ export function bootstrapApp() {
           placedMeshes.push(mesh);
           enforceMeshBudget();
           setStatus(`Placed ${shapeTypeEl.value}`, "ok");
+          pinchConsumed = true;
         }
 
         if (pinchStart && fingerHit && gestureModeEl.value === "transform") {
@@ -342,6 +383,7 @@ export function bootstrapApp() {
           transformLocked = Boolean(activeMesh);
           prevTwoHandAngle = null;
           if (transformLocked) setStatus("Transform lock acquired", "ok");
+          pinchConsumed = true;
         }
 
         if (interaction.pinch && activeMesh && palmHit && gestureModeEl.value === "transform") {
@@ -356,9 +398,9 @@ export function bootstrapApp() {
           const scale = (0.45 + interaction.resize * 2.4) * calibratedScale * twoHand;
           activeMesh.scale.setScalar(scale);
 
-          if (handB) {
-            const p1 = handA[8];
-            const p2 = handB[8];
+          if (secondary) {
+            const p1 = primary[8];
+            const p2 = secondary[8];
             const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
             if (prevTwoHandAngle != null) {
               const delta = angle - prevTwoHandAngle;
@@ -382,6 +424,8 @@ export function bootstrapApp() {
             setStatus("Transform sticky-lock maintained", "ok");
           }
         }
+
+        if (!interaction.pinch) pinchConsumed = false;
 
         prevPinch = interaction.pinch;
       }
