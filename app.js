@@ -10,6 +10,9 @@ const startBtn = document.querySelector("#startBtn");
 const stopBtn = document.querySelector("#stopBtn");
 const undoBtn = document.querySelector("#undoBtn");
 const clearBtn = document.querySelector("#clearBtn");
+const saveSceneBtn = document.querySelector("#saveSceneBtn");
+const loadSceneBtn = document.querySelector("#loadSceneBtn");
+const loadSceneInput = document.querySelector("#loadSceneInput");
 const shapeTypeEl = document.querySelector("#shapeType");
 const gestureModeEl = document.querySelector("#gestureMode");
 const sizeInputEl = document.querySelector("#sizeInput");
@@ -222,6 +225,19 @@ function buildGeometry(type, size) {
   }
 }
 
+function inferShapeTypeFromGeometry(geometry) {
+  if (geometry.type === "SphereGeometry") return "sphere";
+  if (geometry.type === "CylinderGeometry") return "cylinder";
+  if (geometry.type === "BoxGeometry") {
+    const p = geometry.parameters || {};
+    if (Math.abs((p.width || 1) - (p.height || 1)) < 0.001 && Math.abs((p.height || 1) - (p.depth || 1)) < 0.001) {
+      return "cube";
+    }
+    return "cuboid";
+  }
+  return "cube";
+}
+
 function spawnShape(hand) {
   const now = performance.now();
   if (now - lastSpawnAt < spawnCooldownMs) return;
@@ -284,6 +300,42 @@ function clearShapes() {
   }
   setSelection(null);
   setStatus("Cleared all shapes", "idle");
+}
+
+function saveScene() {
+  const payload = placedShapes.map((mesh) => ({
+    type: inferShapeTypeFromGeometry(mesh.geometry),
+    size: Number(mesh.geometry.parameters?.width || mesh.geometry.parameters?.radiusTop || 1),
+    color: `#${mesh.material.color.getHexString()}`,
+    position: mesh.position.toArray(),
+    rotation: [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z],
+  }));
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `nova-scene-${Date.now()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  setStatus(`Saved ${payload.length} shapes`, "ok");
+}
+
+function loadSceneFromPayload(payload) {
+  clearShapes();
+  payload.forEach((item) => {
+    const geometry = buildGeometry(item.type || "cube", Number(item.size || 1));
+    const material = new THREE.MeshStandardMaterial({
+      color: item.color || "#39d0b8",
+      roughness: 0.46,
+      metalness: 0.2,
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    if (Array.isArray(item.position)) mesh.position.set(item.position[0], item.position[1], item.position[2]);
+    if (Array.isArray(item.rotation)) mesh.rotation.set(item.rotation[0], item.rotation[1], item.rotation[2]);
+    placedShapes.push(mesh);
+    scene.add(mesh);
+  });
+  setStatus(`Loaded ${placedShapes.length} shapes`, "ok");
 }
 
 function processGestures(results) {
@@ -428,4 +480,21 @@ startBtn.addEventListener("click", startTracking);
 stopBtn.addEventListener("click", stopTracking);
 undoBtn.addEventListener("click", undoLastShape);
 clearBtn.addEventListener("click", clearShapes);
+saveSceneBtn.addEventListener("click", saveScene);
+loadSceneBtn.addEventListener("click", () => loadSceneInput.click());
+loadSceneInput.addEventListener("change", async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const payload = JSON.parse(text);
+    if (!Array.isArray(payload)) throw new Error("Invalid scene format");
+    loadSceneFromPayload(payload);
+  } catch (err) {
+    console.error(err);
+    setStatus("Failed to load scene JSON", "error");
+  } finally {
+    loadSceneInput.value = "";
+  }
+});
 window.addEventListener("beforeunload", stopTracking);
