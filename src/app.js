@@ -24,6 +24,8 @@ export function bootstrapApp() {
   const colorInputEl = document.querySelector("#colorInput");
   const smoothingInputEl = document.querySelector("#smoothingInput");
   const calibrateBtn = document.querySelector("#calibrateBtn");
+  const snapToggleEl = document.querySelector("#snapToggle");
+  const gridStepInputEl = document.querySelector("#gridStepInput");
   const debugStateEl = document.querySelector("#debugState");
   const statusEl = document.querySelector("#status");
 
@@ -41,6 +43,32 @@ export function bootstrapApp() {
   let prevPinch = false;
   let activeMesh = null;
   const placedMeshes = [];
+
+  function setActiveMesh(mesh) {
+    if (activeMesh === mesh) return;
+    if (activeMesh?.material?.emissive) activeMesh.material.emissive.setHex(0x000000);
+    activeMesh = mesh;
+    if (activeMesh?.material?.emissive) activeMesh.material.emissive.setHex(0x113333);
+  }
+
+  function snapValue(v) {
+    if (snapToggleEl.value !== "on") return v;
+    const step = Number(gridStepInputEl.value || 0.25);
+    return Math.round(v / step) * step;
+  }
+
+  function pickNearestMesh(hitPoint, maxDist = 1.5) {
+    let best = null;
+    let dist = Infinity;
+    for (const mesh of placedMeshes) {
+      const d = mesh.position.distanceTo(hitPoint);
+      if (d < dist && d <= maxDist) {
+        best = mesh;
+        dist = d;
+      }
+    }
+    return best;
+  }
 
   function setStatus(msg, state = "ok") {
     statusEl.textContent = msg;
@@ -64,6 +92,7 @@ export function bootstrapApp() {
     debugStateEl.textContent = JSON.stringify({
       interaction: appState.interaction,
       calibration: appState.calibration,
+      snap: { enabled: snapToggleEl.value === "on", step: Number(gridStepInputEl.value) },
       shape: appState.shape,
       dimension: Number(appState.dimension.toFixed(3)),
       volume: Number(appState.volume.toFixed(3)),
@@ -96,14 +125,14 @@ export function bootstrapApp() {
     const mesh = placedMeshes.pop();
     if (!mesh) return;
     removeMesh(mesh);
-    if (activeMesh === mesh) activeMesh = null;
+    if (activeMesh === mesh) setActiveMesh(null);
     setStatus(`Undid one shape. Remaining ${placedMeshes.length}`, "ok");
     refreshDebug();
   }
 
   function clearAll() {
     while (placedMeshes.length) removeMesh(placedMeshes.pop());
-    activeMesh = null;
+    setActiveMesh(null);
     setStatus("Cleared scene", "idle");
     refreshDebug();
   }
@@ -183,20 +212,24 @@ export function bootstrapApp() {
 
         if (pinchStart && hit && gestureModeEl.value === "spawn") {
           const mesh = world.buildMesh(shapeTypeEl.value, Number(sizeInputEl.value), colorInputEl.value);
-          mesh.position.x = hit.x;
-          mesh.position.z = hit.z;
+          mesh.position.x = snapValue(hit.x);
+          mesh.position.z = snapValue(hit.z);
           mesh.rotation.y = Math.random() * Math.PI;
           mesh.userData.shape = shapeTypeEl.value;
           mesh.userData.baseSize = Number(sizeInputEl.value);
           world.scene.add(mesh);
-          activeMesh = mesh;
+          setActiveMesh(mesh);
           placedMeshes.push(mesh);
           setStatus(`Placed ${shapeTypeEl.value}`, "ok");
         }
 
+        if (pinchStart && hit && gestureModeEl.value === "transform") {
+          setActiveMesh(pickNearestMesh(hit));
+        }
+
         if (interaction.pinch && activeMesh && hit && gestureModeEl.value === "transform") {
-          activeMesh.position.x = hit.x;
-          activeMesh.position.z = hit.z;
+          activeMesh.position.x = snapValue(hit.x);
+          activeMesh.position.z = snapValue(hit.z);
           activeMesh.rotation.y = interaction.rotation;
 
           const calibratedScale = appState.calibration.scaleK || 1;

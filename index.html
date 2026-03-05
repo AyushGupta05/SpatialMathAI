@@ -68,6 +68,19 @@
             <button id="calibrateBtn" class="btn">Calibrate Pose</button>
           </div>
 
+          <label class="field">
+            <span>Snap to Grid</span>
+            <select id="snapToggle">
+              <option value="off">Off</option>
+              <option value="on">On</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>Grid Step</span>
+            <input id="gridStepInput" type="range" min="0.1" max="1.0" step="0.05" value="0.25" />
+          </label>
+
           <div class="controls-row">
             <button id="undoBtn" class="btn">Undo Last</button>
             <button id="clearBtn" class="btn btn-danger">Clear All</button>
