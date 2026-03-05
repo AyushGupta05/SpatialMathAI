@@ -28,6 +28,11 @@ Use `tools/signal_tuner.py` to tune EMA and pinch hysteresis from recorded CSV t
 python3 tools/signal_tuner.py --input pinch_series.csv --alpha 0.38 --pinch-on 0.048 --pinch-off 0.062
 ```
 
+Synthetic stress check:
+```bash
+python3 tools/stress_simulator.py
+```
+
 ## Run
 Serve this folder with any static server and open `index.html`.
 
