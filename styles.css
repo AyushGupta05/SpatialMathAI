@@ -84,6 +84,17 @@ input[type="range"] { width: 100%; }
 
 .hint-list { margin: .3rem 0 0; padding-left: 1rem; color: var(--muted); font-size: .86rem; }
 .hint-list li { margin: .35rem 0; }
+.debug-box {
+  margin: .4rem 0 .6rem;
+  padding: .55rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: #bde6ff;
+  background: rgba(0,0,0,.22);
+  font-size: .74rem;
+  max-height: 150px;
+  overflow: auto;
+}
 
 .stage-wrap {
   position: relative;

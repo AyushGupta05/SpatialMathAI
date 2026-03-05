@@ -59,6 +59,15 @@
             <input id="colorInput" type="color" value="#39d0b8" />
           </label>
 
+          <label class="field">
+            <span>Smoothing Alpha</span>
+            <input id="smoothingInput" type="range" min="0.1" max="0.9" step="0.01" value="0.38" />
+          </label>
+
+          <div class="controls-row">
+            <button id="calibrateBtn" class="btn">Calibrate Pose</button>
+          </div>
+
           <div class="controls-row">
             <button id="undoBtn" class="btn">Undo Last</button>
             <button id="clearBtn" class="btn btn-danger">Clear All</button>
@@ -71,6 +80,7 @@
           </div>
 
           <p id="status" class="status" data-state="idle">Idle</p>
+          <pre id="debugState" class="debug-box">{ "handsDetected": false }</pre>
           <ul class="hint-list">
             <li><strong>Pinch</strong> (thumb + index) to spawn shape at hand position.</li>
             <li><strong>Transform mode:</strong> pinch near an object to grab/move it.</li>
