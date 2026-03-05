@@ -39,6 +39,7 @@ export function bootstrapApp() {
   let handLandmarker = null;
   let stream = null;
   let rafId = null;
+  let lastInferAt = 0;
   let running = false;
   let prevPinch = false;
   let activeMesh = null;
@@ -193,9 +194,12 @@ export function bootstrapApp() {
 
   function detectLoop() {
     if (!running || !handLandmarker) return;
+    const now = performance.now();
+    const minInferMs = 28;
 
-    if (webcamEl.readyState >= 2) {
-      const results = handLandmarker.detectForVideo(webcamEl, performance.now());
+    if (webcamEl.readyState >= 2 && (now - lastInferAt >= minInferMs)) {
+      lastInferAt = now;
+      const results = handLandmarker.detectForVideo(webcamEl, now);
       const handA = results?.landmarks?.[0] || null;
       const handB = results?.landmarks?.[1] || null;
 

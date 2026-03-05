@@ -10,6 +10,10 @@ export class InteractionPipeline {
     this.prevJitter = 0;
     this.prevIndex = null;
     this.pinch = false;
+    this.pinchOnFrames = options.pinchOnFrames ?? 2;
+    this.pinchOffFrames = options.pinchOffFrames ?? 2;
+    this._pinchOnCounter = 0;
+    this._pinchOffCounter = 0;
   }
 
   setAlpha(alpha) {
@@ -33,8 +37,24 @@ export class InteractionPipeline {
     const middle = hand[12];
 
     const pinchDist = dist3(thumb, index);
-    if (!this.pinch && pinchDist <= this.pinchOn) this.pinch = true;
-    if (this.pinch && pinchDist >= this.pinchOff) this.pinch = false;
+    if (!this.pinch && pinchDist <= this.pinchOn) {
+      this._pinchOnCounter += 1;
+      this._pinchOffCounter = 0;
+      if (this._pinchOnCounter >= this.pinchOnFrames) {
+        this.pinch = true;
+        this._pinchOnCounter = 0;
+      }
+    } else if (this.pinch && pinchDist >= this.pinchOff) {
+      this._pinchOffCounter += 1;
+      this._pinchOnCounter = 0;
+      if (this._pinchOffCounter >= this.pinchOffFrames) {
+        this.pinch = false;
+        this._pinchOffCounter = 0;
+      }
+    } else {
+      this._pinchOnCounter = 0;
+      this._pinchOffCounter = 0;
+    }
 
     const span = dist3(index, middle);
     const wristToIndex = dist3(wrist, index);
