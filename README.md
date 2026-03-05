@@ -6,10 +6,12 @@ MediaPipe Hands + Three.js prototype for gesture-based 3D shape creation.
 - Real-time webcam hand tracking (MediaPipe Tasks Vision)
 - Three.js 3D studio with orbit controls
 - Gesture actions:
-  - Pinch (thumb + index) → place selected shape
+  - Spawn mode: pinch (thumb + index) → place selected shape
+  - Transform mode: pinch near object to grab/move; spread index-middle fingers to scale
   - Fist hold (~0.8s) → undo last shape
 - Shape types: cube, cuboid, sphere, cylinder
 - Adjustable base size + color
+- Scene save/load JSON for quick demo resets
 
 ## Run
 Serve this folder with any static server and open `index.html`.

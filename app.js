@@ -30,6 +30,7 @@ let webcamStream = null;
 let isRunning = false;
 let rafId = null;
 let lastVideoTime = -1;
+let lastInferAt = 0;
 let fistStartAt = null;
 let selectedShape = null;
 let isTransformPinching = false;
@@ -439,9 +440,17 @@ function processGestures(results) {
 function detectLoop() {
   if (!isRunning || !handLandmarker) return;
 
-  if (webcamEl.readyState >= 2 && webcamEl.currentTime !== lastVideoTime) {
+  const now = performance.now();
+  const minInferMs = 28; // ~35 FPS cap for stability
+
+  if (
+    webcamEl.readyState >= 2 &&
+    webcamEl.currentTime !== lastVideoTime &&
+    now - lastInferAt >= minInferMs
+  ) {
+    lastInferAt = now;
     lastVideoTime = webcamEl.currentTime;
-    const results = handLandmarker.detectForVideo(webcamEl, performance.now());
+    const results = handLandmarker.detectForVideo(webcamEl, now);
     drawHands(results);
     processGestures(results);
     const count = results?.landmarks?.length ?? 0;
