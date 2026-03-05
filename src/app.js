@@ -26,6 +26,7 @@ export function bootstrapApp() {
   const smoothingInputEl = document.querySelector("#smoothingInput");
   const trackingProfileEl = document.querySelector("#trackingProfile");
   const calibrateBtn = document.querySelector("#calibrateBtn");
+  const calibrationPresetEl = document.querySelector("#calibrationPreset");
   const snapToggleEl = document.querySelector("#snapToggle");
   const gridStepInputEl = document.querySelector("#gridStepInput");
   const transformSnapModeEl = document.querySelector("#transformSnapMode");
@@ -54,6 +55,12 @@ export function bootstrapApp() {
   let activeMesh = null;
   const placedMeshes = [];
   const MAX_MESHES = 220;
+  const calibrationPresets = {
+    custom: null,
+    desk: { scaleK: 1.12, smoothingAlpha: 0.46, baselineDistance: 0.085 },
+    room: { scaleK: 1.0, smoothingAlpha: 0.38, baselineDistance: 0.11 },
+    far: { scaleK: 0.9, smoothingAlpha: 0.3, baselineDistance: 0.145 },
+  };
 
   const selectionRing = world.createSelectionRing();
   const rotationGuide = world.createRotationGuide();
@@ -417,6 +424,17 @@ export function bootstrapApp() {
     appState.calibration.scaleK = deriveScaleK(reference);
     saveCalibration(appState.calibration);
     setStatus("Calibration captured", "ok");
+    refreshDebug();
+  });
+
+  calibrationPresetEl.addEventListener("change", () => {
+    const preset = calibrationPresets[calibrationPresetEl.value];
+    if (!preset) return;
+    appState.calibration = { ...appState.calibration, ...preset };
+    smoothingInputEl.value = String(appState.calibration.smoothingAlpha);
+    pipeline.setAlpha(appState.calibration.smoothingAlpha);
+    saveCalibration(appState.calibration);
+    setStatus(`Calibration preset: ${calibrationPresetEl.value}`, "ok");
     refreshDebug();
   });
 
