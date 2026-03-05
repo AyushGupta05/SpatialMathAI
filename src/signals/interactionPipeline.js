@@ -20,6 +20,32 @@ export class InteractionPipeline {
     this.alpha = clamp(alpha, 0.08, 0.9);
   }
 
+  setProfile(profile) {
+    if (profile === "stable") {
+      this.pinchOn = 0.045;
+      this.pinchOff = 0.066;
+      this.pinchOnFrames = 3;
+      this.pinchOffFrames = 3;
+      this.setAlpha(0.52);
+      return;
+    }
+
+    if (profile === "responsive") {
+      this.pinchOn = 0.052;
+      this.pinchOff = 0.061;
+      this.pinchOnFrames = 1;
+      this.pinchOffFrames = 1;
+      this.setAlpha(0.24);
+      return;
+    }
+
+    // balanced
+    this.pinchOn = 0.048;
+    this.pinchOff = 0.062;
+    this.pinchOnFrames = 2;
+    this.pinchOffFrames = 2;
+  }
+
   update(hand, secondHand = null) {
     if (!hand) {
       return {

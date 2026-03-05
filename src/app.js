@@ -23,6 +23,7 @@ export function bootstrapApp() {
   const sizeInputEl = document.querySelector("#sizeInput");
   const colorInputEl = document.querySelector("#colorInput");
   const smoothingInputEl = document.querySelector("#smoothingInput");
+  const trackingProfileEl = document.querySelector("#trackingProfile");
   const calibrateBtn = document.querySelector("#calibrateBtn");
   const snapToggleEl = document.querySelector("#snapToggle");
   const gridStepInputEl = document.querySelector("#gridStepInput");
@@ -35,6 +36,7 @@ export function bootstrapApp() {
   appState.calibration = loadCalibration();
   const pipeline = new InteractionPipeline({ alpha: appState.calibration.smoothingAlpha });
   smoothingInputEl.value = String(appState.calibration.smoothingAlpha);
+  pipeline.setProfile("balanced");
 
   let handLandmarker = null;
   let stream = null;
@@ -318,6 +320,17 @@ export function bootstrapApp() {
     appState.calibration.smoothingAlpha = alpha;
     pipeline.setAlpha(alpha);
     saveCalibration(appState.calibration);
+    refreshDebug();
+  });
+
+  trackingProfileEl.addEventListener("change", () => {
+    const profile = trackingProfileEl.value;
+    pipeline.setProfile(profile);
+    if (profile === "stable") smoothingInputEl.value = "0.52";
+    else if (profile === "responsive") smoothingInputEl.value = "0.24";
+    else smoothingInputEl.value = String(appState.calibration.smoothingAlpha);
+
+    setStatus(`Tracking profile: ${profile}`, "ok");
     refreshDebug();
   });
 
