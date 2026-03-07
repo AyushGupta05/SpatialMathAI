@@ -23,8 +23,8 @@ export class InteractionPipeline {
 
   setProfile(profile) {
     if (profile === "stable") {
-      this.pinchOn = 0.045;
-      this.pinchOff = 0.066;
+      this.pinchOn = 0.052;
+      this.pinchOff = 0.074;
       this.pinchOnFrames = 3;
       this.pinchOffFrames = 3;
       this.setAlpha(0.52);
@@ -32,23 +32,26 @@ export class InteractionPipeline {
     }
 
     if (profile === "responsive") {
-      this.pinchOn = 0.052;
-      this.pinchOff = 0.061;
+      this.pinchOn = 0.058;
+      this.pinchOff = 0.07;
       this.pinchOnFrames = 1;
       this.pinchOffFrames = 1;
       this.setAlpha(0.24);
       return;
     }
 
-    // balanced
-    this.pinchOn = 0.048;
-    this.pinchOff = 0.062;
-    this.pinchOnFrames = 2;
+    // balanced (slightly looser pinch threshold for webcam variability)
+    this.pinchOn = 0.055;
+    this.pinchOff = 0.073;
+    this.pinchOnFrames = 1;
     this.pinchOffFrames = 2;
   }
 
   update(hand, secondHand = null) {
     if (!hand) {
+      this.pinch = false;
+      this._pinchOnCounter = 0;
+      this._pinchOffCounter = 0;
       return {
         handsDetected: false,
         resize: this.prevResize,
