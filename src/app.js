@@ -88,10 +88,8 @@ export function bootstrapApp() {
 
   const selectionRing = world.createSelectionRing();
   const rotationGuide = world.createRotationGuide();
-  const palmProxy = world.createPalmProxy();
   world.scene.add(selectionRing);
   world.scene.add(rotationGuide);
-  world.scene.add(palmProxy);
 
   function setActiveMesh(mesh) {
     if (activeMesh === mesh) return;
@@ -428,12 +426,7 @@ export function bootstrapApp() {
         const palmHit = smoothedPalm;
         const pinchHit = smoothedPinch;
 
-        if (palmHit && SHOW_HAND_MARKERS) {
-          palmProxy.visible = true;
-          palmProxy.position.set(palmHit.x, 0.02, palmHit.z);
-        } else {
-          palmProxy.visible = false;
-        }
+        // Palm proxy intentionally disabled to keep the world view clean.
 
         const pinchStart = interaction.pinch && !prevPinch;
         const pulseRadius = pinchPulseRadius(interaction.pinchStrength || 0);
@@ -442,7 +435,10 @@ export function bootstrapApp() {
         const pinchHitForSpawn = pinchHitRaw || pinchHit;
         const canSpawn = now - lastSpawnAt >= SPAWN_COOLDOWN_MS;
 
-        if (placementPulseTrigger && pinchHitForSpawn && canSpawn && gestureModeEl.value === "spawn") {
+        const inSpawnMode = gestureModeEl.value === "spawn";
+        const inTransformFallback = gestureModeEl.value === "transform" && !activeMesh;
+        const shouldSpawn = canSpawn && pinchHitForSpawn && (pinchStart || placementPulseTrigger) && (inSpawnMode || inTransformFallback);
+        if (shouldSpawn) {
           const mesh = world.buildMesh(shapeTypeEl.value, Number(sizeInputEl.value), colorInputEl.value);
           mesh.position.x = shouldSnapPosition() ? snapValue(pinchHitForSpawn.x) : pinchHitForSpawn.x;
           mesh.position.z = shouldSnapPosition() ? snapValue(pinchHitForSpawn.z) : pinchHitForSpawn.z;
@@ -517,7 +513,6 @@ export function bootstrapApp() {
       if (!primary) {
         prevPinch = false;
         prevPlacementPulseActive = false;
-        palmProxy.visible = false;
         smoothedPalm = null;
         smoothedPinch = null;
       }
