@@ -3,11 +3,11 @@ import { clamp, ema, dist3, angle2 } from "../core/math.js";
 export class InteractionPipeline {
   constructor(options = {}) {
     this.alpha = options.alpha ?? 0.38;
-    this.pinchOnMin = options.pinchOnMin ?? 0.042;
-    this.pinchOnMax = options.pinchOnMax ?? 0.065;
+    this.pinchOnMin = options.pinchOnMin ?? 0.038;
+    this.pinchOnMax = options.pinchOnMax ?? 0.058;
     this.pinchOffMin = options.pinchOffMin ?? 0.058;
     this.pinchOffMax = options.pinchOffMax ?? 0.095;
-    this.pinchOnRatio = options.pinchOnRatio ?? 0.38;
+    this.pinchOnRatio = options.pinchOnRatio ?? 0.34;
     this.pinchOffRatio = options.pinchOffRatio ?? 0.52;
     this.prevResize = 0;
     this.prevRotation = 0;
@@ -21,7 +21,7 @@ export class InteractionPipeline {
     this.pinchDist = 0;
     this._pinchRatioEma = null;
     this._pinchRatioPrev = null;
-    this.pinchVelocityOn = options.pinchVelocityOn ?? -0.003;
+    this.pinchVelocityOn = options.pinchVelocityOn ?? -0.0034;
     this.pinchVelocityOff = options.pinchVelocityOff ?? 0.0015;
   }
 
@@ -31,45 +31,45 @@ export class InteractionPipeline {
 
   setProfile(profile) {
     if (profile === "stable") {
-      this.pinchOnMin = 0.045;
-      this.pinchOnMax = 0.062;
+      this.pinchOnMin = 0.04;
+      this.pinchOnMax = 0.056;
       this.pinchOffMin = 0.062;
       this.pinchOffMax = 0.092;
-      this.pinchOnRatio = 0.4;
+      this.pinchOnRatio = 0.35;
       this.pinchOffRatio = 0.56;
       this.pinchOnFrames = 3;
       this.pinchOffFrames = 3;
-      this.pinchVelocityOn = -0.002;
+      this.pinchVelocityOn = -0.0028;
       this.pinchVelocityOff = 0.0012;
       this.setAlpha(0.52);
       return;
     }
 
     if (profile === "responsive") {
-      this.pinchOnMin = 0.04;
-      this.pinchOnMax = 0.067;
+      this.pinchOnMin = 0.037;
+      this.pinchOnMax = 0.058;
       this.pinchOffMin = 0.055;
       this.pinchOffMax = 0.1;
-      this.pinchOnRatio = 0.44;
+      this.pinchOnRatio = 0.36;
       this.pinchOffRatio = 0.58;
-      this.pinchOnFrames = 1;
+      this.pinchOnFrames = 2;
       this.pinchOffFrames = 1;
-      this.pinchVelocityOn = -0.004;
+      this.pinchVelocityOn = -0.0042;
       this.pinchVelocityOff = 0.002;
       this.setAlpha(0.24);
       return;
     }
 
     // balanced (slightly looser pinch threshold for webcam variability)
-    this.pinchOnMin = 0.042;
-    this.pinchOnMax = 0.065;
+    this.pinchOnMin = 0.038;
+    this.pinchOnMax = 0.058;
     this.pinchOffMin = 0.058;
     this.pinchOffMax = 0.095;
-    this.pinchOnRatio = 0.42;
-    this.pinchOffRatio = 0.57;
-    this.pinchOnFrames = 1;
+    this.pinchOnRatio = 0.34;
+    this.pinchOffRatio = 0.54;
+    this.pinchOnFrames = 2;
     this.pinchOffFrames = 2;
-    this.pinchVelocityOn = -0.003;
+    this.pinchVelocityOn = -0.0034;
     this.pinchVelocityOff = 0.0015;
   }
 
