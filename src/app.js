@@ -244,21 +244,6 @@ export function bootstrapApp() {
         ctx.stroke();
       }
 
-      // minimal soft palm anchor
-      const palm = palmCenterLandmark(hand);
-      if (palm) {
-        const px = (1 - palm.x) * overlayEl.width;
-        const py = palm.y * overlayEl.height;
-        const aura = 12 + (interaction?.pinchStrength || 0) * 6;
-        const g = ctx.createRadialGradient(px, py, 2, px, py, aura);
-        g.addColorStop(0, isPrimary ? "rgba(147,255,216,0.18)" : "rgba(158,195,255,0.14)");
-        g.addColorStop(1, "rgba(0,0,0,0)");
-        ctx.fillStyle = g;
-        ctx.beginPath();
-        ctx.arc(px, py, aura, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
       if (isPrimary && SHOW_HAND_MARKERS) {
         const contact = midpointLandmark(hand[4], hand[8]) || hand[8];
         const contactX = (1 - contact.x) * overlayEl.width;
