@@ -28,6 +28,7 @@ const PLACEMENT_PULSE_BASE = 8;
 const PLACEMENT_PULSE_GAIN = 7;
 const PLACEMENT_PULSE_TRIGGER_RADIUS = 12.2;
 const SELECTION_RING_BASE_RADIUS = 0.31;
+const VIEW_DRAG_GROUND_LOCK_THRESHOLD = 0.72;
 const TRANSFORM_SELECT_BUFFER = 0.95;
 const TRANSFORM_MIDPOINT_RADIUS_FACTOR = 1.08;
 const TRANSFORM_OPPOSITION_DOT_MAX = 0.72;
@@ -128,6 +129,8 @@ export function bootstrapApp() {
   const rotationGuide = world.createRotationGuide();
   world.scene.add(selectionRing);
   world.scene.add(rotationGuide);
+  const selectionBounds = new THREE.Box3();
+  const dragPlaneNormal = new THREE.Vector3();
 
   function setActiveMesh(mesh) {
     if (activeMesh === mesh) return;
@@ -153,7 +156,7 @@ export function bootstrapApp() {
     if (shapeTypeEl && activeMesh.userData?.shape) shapeTypeEl.value = activeMesh.userData.shape;
     if (colorInputEl && activeMesh.material?.color) colorInputEl.value = `#${activeMesh.material.color.getHexString()}`;
     selectionRing.userData.pulseStartAt = performance.now();
-    selectionRing.position.set(activeMesh.position.x, Math.max(0.02, activeMesh.position.y * 0.06), activeMesh.position.z);
+    syncSelectionMarker(activeMesh);
     rotationGuide.visible = false;
     renderObjectList();
   }
@@ -543,7 +546,7 @@ export function bootstrapApp() {
     const scale = (targetRadius / SELECTION_RING_BASE_RADIUS) * (idlePulse + (activeTransform ? entryBoost * 0.35 : entryBoost * 0.16));
 
     selectionRing.visible = true;
-    selectionRing.position.set(activeMesh.position.x, Math.max(0.02, activeMesh.position.y * 0.06), activeMesh.position.z);
+    syncSelectionMarker(activeMesh);
     selectionRing.scale.setScalar(scale);
     selectionRing.material.opacity = activeTransform
       ? 0.46 + entryBoost * 0.28 + (idlePulse - 1) * 1.8
@@ -551,7 +554,7 @@ export function bootstrapApp() {
 
     if (rotationSession?.mesh === activeMesh) {
       const guideLength = Math.max(0.9, meshSelectionRadius(activeMesh) * 0.85);
-      rotationGuide.position.set(activeMesh.position.x, 0.06, activeMesh.position.z);
+      rotationGuide.position.copy(activeMesh.position);
       rotationGuide.setDirection(
         new THREE.Vector3(Math.cos(activeMesh.rotation.y), 0, Math.sin(activeMesh.rotation.y)).normalize()
       );
@@ -706,6 +709,17 @@ export function bootstrapApp() {
     const baseRadius = mesh.userData.selectionRadius ?? 0.42;
     const scale = Math.max(Math.abs(mesh.scale.x || 1), Math.abs(mesh.scale.z || 1), 1);
     return (baseRadius * scale) + TRANSFORM_SELECT_BUFFER;
+  }
+
+  function syncSelectionMarker(mesh) {
+    if (!mesh) return;
+    selectionBounds.setFromObject(mesh);
+    const baseY = selectionBounds.isEmpty()
+      ? (mesh.position.y - groundAlignedY(mesh))
+      : selectionBounds.min.y;
+    const markerGap = Math.max(0.015, Math.min(0.04, meshSelectionRadius(mesh) * 0.03));
+    selectionRing.position.set(mesh.position.x, baseY - markerGap, mesh.position.z);
+    selectionRing.rotation.set(-Math.PI / 2, 0, 0);
   }
 
   function pickNearestMesh(hitPoint, maxDist = 1.5) {
@@ -1653,6 +1667,15 @@ export function bootstrapApp() {
     appState.surfaceArea = metrics.surfaceArea;
   }
 
+  function groundAlignedY(mesh) {
+    if (mesh?.userData?.shape === "line") return mesh?.position?.y ?? 0;
+    if (!mesh?.geometry) return mesh?.position?.y ?? 0;
+    mesh.geometry.computeBoundingBox?.();
+    const bbox = mesh.geometry.boundingBox;
+    if (!bbox) return mesh?.position?.y ?? 0;
+    return (bbox.max.y - bbox.min.y) * Math.abs(mesh.scale.y || 1) * 0.5;
+  }
+
   function removeMesh(mesh) {
     if (!mesh) return;
     world.scene.remove(mesh);
@@ -1662,7 +1685,10 @@ export function bootstrapApp() {
 
   function beginDragSession(mesh, clientX, clientY, pointerId = null) {
     if (!mesh) return false;
-    const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -mesh.position.y);
+    world.camera.getWorldDirection(dragPlaneNormal);
+    const dragPlane = Math.abs(dragPlaneNormal.y) > VIEW_DRAG_GROUND_LOCK_THRESHOLD
+      ? new THREE.Plane(new THREE.Vector3(0, 1, 0), -mesh.position.y)
+      : new THREE.Plane().setFromNormalAndCoplanarPoint(dragPlaneNormal.clone().normalize(), mesh.position.clone());
     const intersection = world.projectClientToPlane(clientX, clientY, dragPlane);
     if (!intersection) return false;
     dragSession = {
@@ -1696,13 +1722,17 @@ export function bootstrapApp() {
       );
       dragSession.mesh.position.copy(targetPosition);
     } else {
-      dragSession.mesh.position.x = targetPosition.x;
-      dragSession.mesh.position.z = targetPosition.z;
-      alignMeshToGround(dragSession.mesh);
+      dragSession.mesh.position.copy(targetPosition);
+      const groundedY = groundAlignedY(dragSession.mesh);
+      const nearGround = Math.abs(dragSession.mesh.position.y - groundedY) <= 0.04;
+      dragSession.mesh.userData.floorLocked = nearGround;
+      if (nearGround) {
+        alignMeshToGround(dragSession.mesh);
+      }
     }
 
     updateMeshMetadata(dragSession.mesh);
-    selectionRing.position.set(dragSession.mesh.position.x, 0.02, dragSession.mesh.position.z);
+    syncSelectionMarker(dragSession.mesh);
     refreshDebug();
     return true;
   }
@@ -2083,7 +2113,7 @@ export function bootstrapApp() {
               targetRotation,
               TRANSFORM_ROTATION_SMOOTHING
             );
-            selectionRing.position.set(rotationSession.mesh.position.x, 0.02, rotationSession.mesh.position.z);
+            syncSelectionMarker(rotationSession.mesh);
           }
         } else {
           if (rotationSession && !transformSession) {
@@ -2147,7 +2177,7 @@ export function bootstrapApp() {
             transformSession.mesh
           );
 
-          selectionRing.position.set(transformSession.mesh.position.x, 0.02, transformSession.mesh.position.z);
+          syncSelectionMarker(transformSession.mesh);
         }
 
         prevPointPose = pointActive;

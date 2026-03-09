@@ -280,16 +280,23 @@ export function createWorld(container) {
   function createSelectionRing() {
     const ring = new THREE.Mesh(
       new THREE.RingGeometry(0.28, 0.34, 48),
-      new THREE.MeshBasicMaterial({ color: 0x7cf7e4, transparent: true, opacity: 0.95, side: THREE.DoubleSide })
+      new THREE.MeshBasicMaterial({
+        color: 0x7cf7e4,
+        transparent: true,
+        opacity: 0.95,
+        side: THREE.DoubleSide,
+        depthTest: false,
+        depthWrite: false,
+      })
     );
-    ring.rotation.x = -Math.PI / 2;
+    ring.renderOrder = 12;
     ring.visible = false;
     return ring;
   }
 
   function createRotationGuide() {
     const dir = new THREE.Vector3(1, 0, 0);
-    const origin = new THREE.Vector3(0, 0.05, 0);
+    const origin = new THREE.Vector3(0, 0, 0);
     const arrow = new THREE.ArrowHelper(dir, origin, 0.9, 0xffde72, 0.18, 0.11);
     arrow.visible = false;
     return arrow;
