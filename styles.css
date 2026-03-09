@@ -767,6 +767,40 @@ input[type="color"]::-webkit-color-swatch {
   color: #e6f8ff;
 }
 
+.mouse-place-menu {
+  position: absolute;
+  z-index: 7;
+  min-width: 164px;
+  padding: 0.38rem;
+  border: 1px solid rgba(98, 202, 255, 0.34);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(8, 24, 42, 0.96), rgba(5, 15, 30, 0.96));
+  box-shadow:
+    0 20px 44px rgba(0, 0, 0, 0.34),
+    0 0 0 1px rgba(41, 126, 209, 0.16),
+    inset 0 1px 0 rgba(189, 238, 255, 0.12);
+  backdrop-filter: blur(12px);
+}
+
+.mouse-place-action {
+  width: 100%;
+  border: 1px solid rgba(120, 216, 255, 0.18);
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(12, 34, 56, 0.94), rgba(9, 24, 42, 0.94));
+  color: #d8f6ff;
+  font: 600 0.82rem/1 "Space Grotesk", "Segoe UI", sans-serif;
+  letter-spacing: 0.01em;
+  text-align: left;
+  padding: 0.66rem 0.82rem;
+  cursor: pointer;
+}
+
+.mouse-place-action:hover {
+  border-color: rgba(132, 231, 255, 0.36);
+  background: linear-gradient(180deg, rgba(16, 42, 66, 0.98), rgba(10, 28, 46, 0.98));
+  color: #f3fcff;
+}
+
 .stage,
 #overlay {
   position: absolute;

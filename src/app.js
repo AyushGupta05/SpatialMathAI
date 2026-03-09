@@ -29,6 +29,10 @@ const PLACEMENT_PULSE_GAIN = 7;
 const PLACEMENT_PULSE_TRIGGER_RADIUS = 12.2;
 const SELECTION_RING_BASE_RADIUS = 0.31;
 const VIEW_DRAG_GROUND_LOCK_THRESHOLD = 0.72;
+const LINE_DEPTH_RAY_GAIN = 2.9;
+const LINE_DEPTH_MAX_OFFSET = 9;
+const LINE_DEPTH_DEADZONE = 0.005;
+const LINE_ENDPOINT_SMOOTHING = 0.52;
 const TRANSFORM_SELECT_BUFFER = 0.95;
 const TRANSFORM_MIDPOINT_RADIUS_FACTOR = 1.08;
 const TRANSFORM_OPPOSITION_DOT_MAX = 0.72;
@@ -76,6 +80,9 @@ export function bootstrapApp() {
   const statusEl = document.querySelector("#status");
   const objectListEl = document.querySelector("#objectList");
   const objectCountEl = document.querySelector("#objectCount");
+  const stageWrapEl = document.querySelector(".stage-wrap");
+  const mousePlaceMenuEl = document.querySelector("#mousePlaceMenu");
+  const mousePlaceActionEl = document.querySelector("#mousePlaceAction");
 
   const ctx = overlayEl.getContext("2d");
   const world = createWorld(worldMount);
@@ -114,6 +121,8 @@ export function bootstrapApp() {
   let activeMesh = null;
   let dragIntent = null;
   let dragSession = null;
+  let secondaryClickIntent = null;
+  let mousePlaceContext = null;
   let nextObjectSerial = 0;
   let placementPreview = null;
   const placedMeshes = [];
@@ -131,6 +140,7 @@ export function bootstrapApp() {
   world.scene.add(rotationGuide);
   const selectionBounds = new THREE.Box3();
   const dragPlaneNormal = new THREE.Vector3();
+  const lineDepthDirection = new THREE.Vector3();
 
   function setActiveMesh(mesh) {
     if (activeMesh === mesh) return;
@@ -259,7 +269,7 @@ export function bootstrapApp() {
     const endpoint = anchoredPlacementHit(placementTarget) || startHit.clone();
 
     if (placementTarget?.floorLocked === false) {
-      return endpoint;
+      return applyLineDepthOffset(endpoint, placementTarget, contactLandmark, startLandmark);
     }
 
     endpoint.y = 0.03;
@@ -278,6 +288,33 @@ export function bootstrapApp() {
       endpoint.x = startHit.x;
       endpoint.z = startHit.z;
     }
+    return endpoint;
+  }
+
+  function applyLineDepthOffset(endpoint, placementTarget, contactLandmark, startLandmark) {
+    if (
+      !endpoint ||
+      placementTarget?.floorLocked !== false ||
+      !contactLandmark ||
+      !startLandmark
+    ) {
+      return endpoint;
+    }
+
+    const depthDelta = (contactLandmark.z ?? 0) - (startLandmark.z ?? 0);
+    if (Math.abs(depthDelta) < LINE_DEPTH_DEADZONE) {
+      return endpoint;
+    }
+
+    lineDepthDirection.copy(endpoint).sub(world.camera.position);
+    const rayLength = lineDepthDirection.length();
+    if (rayLength < 1e-4) {
+      return endpoint;
+    }
+
+    lineDepthDirection.multiplyScalar(1 / rayLength);
+    const depthOffset = clamp(depthDelta * rayLength * LINE_DEPTH_RAY_GAIN, -LINE_DEPTH_MAX_OFFSET, LINE_DEPTH_MAX_OFFSET);
+    endpoint.addScaledVector(lineDepthDirection, depthOffset);
     return endpoint;
   }
 
@@ -381,12 +418,17 @@ export function bootstrapApp() {
     }
 
     if (hitPoint && contactLandmark) {
-      placementPreview.lineEndHit = resolveLineEndpoint(
+      const nextEndpoint = resolveLineEndpoint(
         previewTarget,
         contactLandmark,
         placementPreview.lineStartHit,
         placementPreview.lineStartLandmark
       );
+      if (nextEndpoint) {
+        placementPreview.lineEndHit = placementPreview.lineEndHit
+          ? placementPreview.lineEndHit.lerp(nextEndpoint, LINE_ENDPOINT_SMOOTHING)
+          : nextEndpoint;
+      }
     }
 
     syncPreviewMeshAppearance(placementPreview.mesh, "line", nextColor);
@@ -479,11 +521,100 @@ export function bootstrapApp() {
     placedMeshes.push(mesh);
     enforceMeshBudget();
     updateGeometryMetrics(mesh.userData.shape, mesh.userData.baseSize, mesh);
-    setActiveMesh(mesh);
+    setActiveMesh(null);
     setStatus(`Placed ${mesh.userData.shape}`, "ok");
     placementPreview = null;
     lastOperationAt = now;
     return true;
+  }
+
+  function clientToNormalizedLandmark(clientX, clientY, depth = 0) {
+    const rect = stageCanvas?.getBoundingClientRect?.();
+    if (!rect) return null;
+    return {
+      x: clamp((clientX - rect.left) / Math.max(1, rect.width), 0, 1),
+      y: clamp((clientY - rect.top) / Math.max(1, rect.height), 0, 1),
+      z: depth,
+    };
+  }
+
+  function currentMousePlaceLabel() {
+    if (shapeTypeEl.value === "line") {
+      return placementPreview?.shape === "line" ? "Place Line End" : "Place Line Start";
+    }
+    const shapeName = shapeTypeEl.value.charAt(0).toUpperCase() + shapeTypeEl.value.slice(1);
+    return `Place ${shapeName}`;
+  }
+
+  function closeMousePlaceMenu() {
+    mousePlaceContext = null;
+    mousePlaceMenuEl?.classList.add("hidden");
+    mousePlaceMenuEl?.setAttribute("aria-hidden", "true");
+  }
+
+  function openMousePlaceMenu(clientX, clientY) {
+    if (!mousePlaceMenuEl || !mousePlaceActionEl || !stageWrapEl) return;
+    mousePlaceContext = { clientX, clientY };
+    mousePlaceActionEl.textContent = currentMousePlaceLabel();
+
+    const rect = stageWrapEl.getBoundingClientRect();
+    mousePlaceMenuEl.classList.remove("hidden");
+    mousePlaceMenuEl.setAttribute("aria-hidden", "false");
+
+    const menuWidth = mousePlaceMenuEl.offsetWidth || 168;
+    const menuHeight = mousePlaceMenuEl.offsetHeight || 52;
+    const left = Math.min(
+      Math.max(10, clientX - rect.left),
+      Math.max(10, rect.width - menuWidth - 10)
+    );
+    const top = Math.min(
+      Math.max(10, clientY - rect.top),
+      Math.max(10, rect.height - menuHeight - 10)
+    );
+
+    mousePlaceMenuEl.style.left = `${left}px`;
+    mousePlaceMenuEl.style.top = `${top}px`;
+  }
+
+  function placeShapeFromMouse(clientX, clientY) {
+    const now = performance.now();
+    const lineToolActive = shapeTypeEl.value === "line";
+    const anchorPoint = placementPreview?.shape === "line"
+      ? (placementPreview.lineStartHit || world.getViewTarget())
+      : world.getViewTarget();
+    const placementTarget = world.projectClientToPlacement?.(clientX, clientY, anchorPoint);
+    if (!placementTarget?.point) {
+      setStatus("Couldn't place object at that point", "idle");
+      return false;
+    }
+
+    const landmark = clientToNormalizedLandmark(clientX, clientY, 0);
+    if (lineToolActive) {
+      if (placementPreview?.shape && placementPreview.shape !== "line") {
+        disposePlacementPreview();
+      }
+      if (placementPreview?.shape !== "line") {
+        ensurePlacementPreview(placementTarget, landmark);
+        setStatus("Line start placed. Right click again to place the end", "ok");
+        return true;
+      }
+      ensurePlacementPreview(placementTarget, landmark);
+      if (placementPreview?.lineEndHit && confirmPlacementPreview(now)) {
+        lastSpawnAt = now;
+        return true;
+      }
+      return false;
+    }
+
+    if (placementPreview) {
+      disposePlacementPreview();
+    }
+    ensurePlacementPreview(placementTarget, landmark);
+    if (confirmPlacementPreview(now)) {
+      lastSpawnAt = now;
+      return true;
+    }
+    return false;
   }
 
   function beginTransformSession(mesh, hitA, hitB, palmA, palmB, now) {
@@ -763,7 +894,14 @@ export function bootstrapApp() {
     );
   }
 
-  function pickRotationTarget(pointerHit, fallbackHit) {
+  function pickRotationTarget(pointerHit, fallbackHit, handA = null, handB = null) {
+    if (
+      activeMesh &&
+      placedMeshes.includes(activeMesh) &&
+      handsFrameSelectedMesh(handA, handB, activeMesh)
+    ) {
+      return activeMesh;
+    }
     const preferredHit = pointerHit || fallbackHit;
     if (
       activeMesh &&
@@ -789,8 +927,58 @@ export function bootstrapApp() {
     return 0;
   }
 
-  function pickMeshForTransform(hitA, hitB) {
+  function meshScreenPoint(mesh) {
+    if (!mesh) return null;
+    const projected = mesh.position.clone().project(world.camera);
+    if (projected.z < -1 || projected.z > 1) return null;
+    return {
+      x: (projected.x + 1) * 0.5,
+      y: (1 - projected.y) * 0.5,
+    };
+  }
+
+  function handsFrameSelectedMesh(handA, handB, mesh) {
+    if (!handA || !handB || !mesh) return false;
+    const screenPoint = meshScreenPoint(mesh);
+    if (!screenPoint) return false;
+
+    const ax = handA.x ?? 0.5;
+    const ay = handA.y ?? 0.5;
+    const bx = handB.x ?? 0.5;
+    const by = handB.y ?? 0.5;
+    const distA = Math.hypot(ax - screenPoint.x, ay - screenPoint.y);
+    const distB = Math.hypot(bx - screenPoint.x, by - screenPoint.y);
+    const midpointDist = Math.hypot(((ax + bx) * 0.5) - screenPoint.x, ((ay + by) * 0.5) - screenPoint.y);
+    const vecAX = ax - screenPoint.x;
+    const vecAY = ay - screenPoint.y;
+    const vecBX = bx - screenPoint.x;
+    const vecBY = by - screenPoint.y;
+    const lenA = Math.hypot(vecAX, vecAY);
+    const lenB = Math.hypot(vecBX, vecBY);
+    const oppositionDot = (lenA > 1e-4 && lenB > 1e-4)
+      ? (((vecAX * vecBX) + (vecAY * vecBY)) / (lenA * lenB))
+      : 1;
+    const handSpan = Math.hypot(ax - bx, ay - by);
+
+    return (
+      distA <= 0.24 &&
+      distB <= 0.24 &&
+      midpointDist <= 0.18 &&
+      handSpan >= 0.11 &&
+      oppositionDot <= 0.45
+    );
+  }
+
+  function pickMeshForTransform(hitA, hitB, handA = null, handB = null) {
     if (!hitA || !hitB) return null;
+
+    if (
+      activeMesh &&
+      placedMeshes.includes(activeMesh) &&
+      handsFrameSelectedMesh(handA, handB, activeMesh)
+    ) {
+      return activeMesh;
+    }
 
     const midpoint = hitA.clone().lerp(hitB, 0.5);
     let best = null;
@@ -1018,6 +1206,27 @@ export function bootstrapApp() {
     const thumbLeading = lmkDist(thumbTip, wrist) >= lmkDist(thumbIp, wrist) * 0.98;
     const indexLeading = lmkDist(indexTip, wrist) >= lmkDist(indexDip, wrist) * 0.98;
     return pinchRatio < 0.28 && pinchFrontOfPalm && thumbLeading && indexLeading;
+  }
+
+  function isLinePointPinchPose(hand) {
+    if (!hand) return false;
+    const scale = palmScale(hand);
+    const wrist = hand[0];
+    const palmCenter = {
+      x: (hand[0].x + hand[5].x + hand[9].x + hand[13].x + hand[17].x) / 5,
+      y: (hand[0].y + hand[5].y + hand[9].y + hand[13].y + hand[17].y) / 5,
+      z: (hand[0].z + hand[5].z + hand[9].z + hand[13].z + hand[17].z) / 5,
+    };
+    const thumbTip = hand[4];
+    const indexTip = hand[8];
+    const thumbIp = hand[3];
+    const indexDip = hand[7];
+    const pinchMid = midpointLandmark(thumbTip, indexTip);
+    const pinchRatio = lmkDist(thumbTip, indexTip) / scale;
+    const pinchFrontOfPalm = pinchMid ? (lmkDist(pinchMid, palmCenter) / scale) > 0.34 : false;
+    const thumbReady = lmkDist(thumbTip, wrist) >= lmkDist(thumbIp, wrist) * 0.95;
+    const indexReady = lmkDist(indexTip, wrist) >= lmkDist(indexDip, wrist) * 0.97;
+    return pinchRatio < 0.34 && pinchFrontOfPalm && thumbReady && indexReady;
   }
 
   function isPointPose(hand) {
@@ -2023,9 +2232,11 @@ export function bootstrapApp() {
       const conjureCooldownActive = autoMode === "spawn" && !placementPreview && (now - lastSpawnAt) < SPAWN_COOLDOWN_MS;
 
       if (autoMode === "spawn" && primary && !transformEndedThisFrame) {
+        const lineToolActive = shapeTypeEl.value === "line";
         const directPinchPose = isDirectPinchPose(primary);
+        const linePointPinchPose = lineToolActive && isLinePointPinchPose(primary);
         const pinchActive =
-          (((interaction.pinch && (interaction.pinchStrength || 0) >= 0.4) || directPinchPose)) &&
+          (((interaction.pinch && (interaction.pinchStrength || 0) >= (lineToolActive ? 0.24 : 0.4)) || directPinchPose || linePointPinchPose)) &&
           signal !== SIGNALS.FIST_DELETE;
         const pinchStart = pinchActive && !prevPinch;
         const pulseRadius = pinchPulseRadius(interaction.pinchStrength || 0);
@@ -2033,11 +2244,10 @@ export function bootstrapApp() {
         const placementPulseTrigger = placementPulseActive && !prevPlacementPulseActive;
         const canSpawn = now - lastSpawnAt >= SPAWN_COOLDOWN_MS;
         const canOperate = now - lastOperationAt >= OPERATION_COOLDOWN_MS;
-        const lineToolActive = shapeTypeEl.value === "line";
         const hadLineDraft = placementPreview?.shape === "line";
 
         if (lineToolActive) {
-          if (!hadLineDraft && canSpawn && pinchPlacement && primaryContactLandmark && (pinchStart || placementPulseTrigger)) {
+          if (!hadLineDraft && canSpawn && pinchPlacement && primaryContactLandmark && pinchStart) {
             ensurePlacementPreview(pinchPlacement, primaryContactLandmark);
             setStatus("Line start placed. Move to the next point and pinch again to finish", "ok");
           } else if (hadLineDraft) {
@@ -2100,7 +2310,7 @@ export function bootstrapApp() {
           pendingTransformSince = null;
           const rotationAngle = twoHandRotationAngle(primaryIndexHit, secondaryIndexHit, primary, secondary);
           const target = (!rotationSession?.mesh || !prevPointPose)
-            ? pickRotationTarget(indexMidpoint, palmMidpoint)
+            ? pickRotationTarget(indexMidpoint, palmMidpoint, primary?.[8], secondary?.[8])
             : rotationSession.mesh;
           if (target && (!rotationSession?.mesh || !prevPointPose)) {
             beginRotationSession(target, rotationAngle, now);
@@ -2124,7 +2334,7 @@ export function bootstrapApp() {
 
         if (!pointActive && handCount >= 2 && primaryPalmHit && secondaryPalmHit && primaryPalm && secondaryPalm) {
           if (!transformSession) {
-            const candidate = pickMeshForTransform(primaryPalmHit, secondaryPalmHit);
+            const candidate = pickMeshForTransform(primaryPalmHit, secondaryPalmHit, primaryPalm, secondaryPalm);
             const canLock = updatePendingTransformCandidate(candidate, now);
             if (candidate && canLock) {
               beginTransformSession(candidate, primaryPalmHit, secondaryPalmHit, primaryPalm, secondaryPalm, now);
@@ -2449,7 +2659,17 @@ export function bootstrapApp() {
   const stageCanvas = world.renderer?.domElement;
 
   stageCanvas?.addEventListener("pointerdown", (event) => {
+    if (event.button === 2) {
+      secondaryClickIntent = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        moved: false,
+      };
+      return;
+    }
     if (event.button !== 0 || placementPreview) return;
+    closeMousePlaceMenu();
     const hit = world.pickObject(event.clientX, event.clientY, placedMeshes);
     const mesh = hit?.object || null;
     if (!mesh) return;
@@ -2467,6 +2687,12 @@ export function bootstrapApp() {
   });
 
   stageCanvas?.addEventListener("pointermove", (event) => {
+    if (secondaryClickIntent && event.pointerId === secondaryClickIntent.pointerId) {
+      const moved = Math.hypot(event.clientX - secondaryClickIntent.startX, event.clientY - secondaryClickIntent.startY);
+      if (moved >= 6) {
+        secondaryClickIntent.moved = true;
+      }
+    }
     if (dragIntent && !dragSession && event.pointerId === dragIntent.pointerId) {
       const moved = Math.hypot(event.clientX - dragIntent.startX, event.clientY - dragIntent.startY);
       if (moved >= 5) {
@@ -2482,6 +2708,13 @@ export function bootstrapApp() {
     if (dragIntent && event?.pointerId === dragIntent.pointerId) {
       clearDragIntent();
     }
+    if (
+      secondaryClickIntent &&
+      event?.pointerId === secondaryClickIntent.pointerId &&
+      (event.type === "pointercancel" || event.button !== 2)
+    ) {
+      secondaryClickIntent = null;
+    }
     if (!dragSession || (event?.pointerId != null && dragSession.pointerId != null && event.pointerId !== dragSession.pointerId)) {
       if (event?.pointerId != null) stageCanvas?.releasePointerCapture?.(event.pointerId);
       return;
@@ -2492,6 +2725,38 @@ export function bootstrapApp() {
 
   stageCanvas?.addEventListener("pointerup", finishPointerDrag);
   stageCanvas?.addEventListener("pointercancel", finishPointerDrag);
+  stageCanvas?.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    const stationaryClick = Boolean(
+      secondaryClickIntent &&
+      !secondaryClickIntent.moved &&
+      (event.pointerId == null || secondaryClickIntent.pointerId === event.pointerId)
+    );
+    secondaryClickIntent = null;
+    if (!stationaryClick) {
+      closeMousePlaceMenu();
+      return;
+    }
+    openMousePlaceMenu(event.clientX, event.clientY);
+  });
+
+  mousePlaceActionEl?.addEventListener("click", () => {
+    if (!mousePlaceContext) return;
+    placeShapeFromMouse(mousePlaceContext.clientX, mousePlaceContext.clientY);
+    closeMousePlaceMenu();
+  });
+
+  document.addEventListener("pointerdown", (event) => {
+    if (!mousePlaceContext) return;
+    if (mousePlaceMenuEl?.contains(event.target)) return;
+    closeMousePlaceMenu();
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeMousePlaceMenu();
+    }
+  });
 
   transformSnapModeEl.addEventListener("change", refreshDebug);
   navigationModeEl?.addEventListener("change", () => {

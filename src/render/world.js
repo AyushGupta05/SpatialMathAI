@@ -235,6 +235,28 @@ export function createWorld(container) {
     return ok ? hit : null;
   }
 
+  function projectClientToPlacement(clientX, clientY, anchorPoint = null) {
+    setRayFromClient(clientX, clientY);
+    camera.getWorldDirection(cameraForward);
+
+    if (Math.abs(cameraForward.y) > 0.72) {
+      const hit = new THREE.Vector3();
+      const ok = raycaster.ray.intersectPlane(groundPlane, hit);
+      return ok ? { point: hit, floorLocked: true } : null;
+    }
+
+    const coplanarPoint = anchorPoint?.clone?.() || controls.target.clone();
+    placementPlane.setFromNormalAndCoplanarPoint(cameraForward.clone().normalize(), coplanarPoint);
+    const hit = new THREE.Vector3();
+    if (raycaster.ray.intersectPlane(placementPlane, hit)) {
+      return { point: hit, floorLocked: false };
+    }
+
+    const fallback = new THREE.Vector3();
+    const ok = raycaster.ray.intersectPlane(groundPlane, fallback);
+    return ok ? { point: fallback, floorLocked: true } : null;
+  }
+
   function pickObject(clientX, clientY, objects = []) {
     setRayFromClient(clientX, clientY);
     const intersections = raycaster.intersectObjects(objects, false);
@@ -358,6 +380,7 @@ export function createWorld(container) {
     projectToPlacement,
     getViewTarget,
     projectClientToPlane,
+    projectClientToPlacement,
     pickObject,
     buildMesh,
     buildLineMesh,
