@@ -111,6 +111,8 @@ export function bootstrapApp() {
   let pendingTransformSince = null;
   let rotationSession = null;
   let activeMesh = null;
+  let dragIntent = null;
+  let dragSession = null;
   let nextObjectSerial = 0;
   let placementPreview = null;
   const placedMeshes = [];
@@ -150,7 +152,8 @@ export function bootstrapApp() {
     }
     if (shapeTypeEl && activeMesh.userData?.shape) shapeTypeEl.value = activeMesh.userData.shape;
     if (colorInputEl && activeMesh.material?.color) colorInputEl.value = `#${activeMesh.material.color.getHexString()}`;
-    selectionRing.position.set(activeMesh.position.x, 0.02, activeMesh.position.z);
+    selectionRing.userData.pulseStartAt = performance.now();
+    selectionRing.position.set(activeMesh.position.x, Math.max(0.02, activeMesh.position.y * 0.06), activeMesh.position.z);
     rotationGuide.visible = false;
     renderObjectList();
   }
@@ -225,16 +228,37 @@ export function bootstrapApp() {
     mesh.userData.lineEnd = endHit.toArray();
   }
 
+  function resolvePlacementTarget(targetLike, fallbackFloorLocked = true) {
+    if (!targetLike) return null;
+    const point = targetLike?.isVector3 ? targetLike : targetLike.point;
+    if (!point?.isVector3) return null;
+    return {
+      point,
+      floorLocked: targetLike?.isVector3
+        ? fallbackFloorLocked
+        : (targetLike.floorLocked ?? fallbackFloorLocked),
+    };
+  }
+
   function normalizeLineAnchor(hitPoint) {
-    const anchor = anchoredPlacementHit(hitPoint);
+    const placementTarget = resolvePlacementTarget(hitPoint);
+    const anchor = anchoredPlacementHit(placementTarget);
     if (!anchor) return null;
-    anchor.y = 0.03;
+    if (placementTarget?.floorLocked !== false) {
+      anchor.y = 0.03;
+    }
     return anchor;
   }
 
   function resolveLineEndpoint(hitPoint, contactLandmark, startHit, startLandmark) {
     if (!startHit) return null;
-    const endpoint = anchoredPlacementHit(hitPoint) || startHit.clone();
+    const placementTarget = resolvePlacementTarget(hitPoint, true);
+    const endpoint = anchoredPlacementHit(placementTarget) || startHit.clone();
+
+    if (placementTarget?.floorLocked === false) {
+      return endpoint;
+    }
+
     endpoint.y = 0.03;
 
     if (!contactLandmark || !startLandmark) return endpoint;
@@ -280,15 +304,24 @@ export function bootstrapApp() {
     mesh.material.depthWrite = false;
   }
 
-  function anchoredPlacementHit(hitPoint) {
-    if (!hitPoint) return null;
-    const anchoredHit = hitPoint.clone();
-    anchoredHit.x = shouldSnapPosition() ? snapValue(hitPoint.x) : hitPoint.x;
-    anchoredHit.z = shouldSnapPosition() ? snapValue(hitPoint.z) : hitPoint.z;
+  function anchoredPlacementHit(hitPoint, fallbackFloorLocked = true) {
+    const placementTarget = resolvePlacementTarget(hitPoint, fallbackFloorLocked);
+    if (!placementTarget?.point) return null;
+    const anchoredHit = placementTarget.point.clone();
+    if (shouldSnapPosition()) {
+      anchoredHit.x = snapValue(anchoredHit.x);
+      anchoredHit.z = snapValue(anchoredHit.z);
+      if (!placementTarget.floorLocked) {
+        anchoredHit.y = snapValue(anchoredHit.y);
+      }
+    }
+    if (placementTarget.floorLocked) {
+      anchoredHit.y = 0;
+    }
     return anchoredHit;
   }
 
-  function createLinePlacementPreview(startHit, startLandmark, nextColor, nextSize) {
+  function createLinePlacementPreview(startHit, startLandmark, nextColor, nextSize, floorLocked = true) {
     const mesh = world.buildLineMesh(startHit, defaultLineEnd(startHit), nextSize, nextColor);
     const pointMarker = buildLinePointMarker(nextColor, startHit);
     world.scene.add(mesh);
@@ -302,6 +335,7 @@ export function bootstrapApp() {
       lineStartLandmark: cloneLandmark(startLandmark),
       lineEndHit: null,
       stage: "await-end-point",
+      floorLocked,
     };
     syncPreviewMeshAppearance(mesh, "line", nextColor);
     applyLineEndpoints(mesh, placementPreview.lineStartHit, defaultLineEnd(placementPreview.lineStartHit), nextSize);
@@ -311,19 +345,29 @@ export function bootstrapApp() {
   function ensureLinePlacementPreview(hitPoint = null, contactLandmark = null) {
     const nextColor = colorInputEl.value;
     const nextSize = Number(sizeInputEl.value);
+    const previewTarget = placementPreview?.shape === "line"
+      ? resolvePlacementTarget(hitPoint, placementPreview.floorLocked)
+      : resolvePlacementTarget(hitPoint);
 
     if (!placementPreview?.mesh || placementPreview.shape !== "line") {
-      const startHit = normalizeLineAnchor(hitPoint);
+      const startHit = normalizeLineAnchor(previewTarget);
       if (!startHit || !contactLandmark) return null;
-      return createLinePlacementPreview(startHit, contactLandmark, nextColor, nextSize);
+      return createLinePlacementPreview(
+        startHit,
+        contactLandmark,
+        nextColor,
+        nextSize,
+        previewTarget?.floorLocked !== false
+      );
     }
 
     if (placementPreview.previewSize !== nextSize) {
       const savedStartHit = placementPreview.lineStartHit.clone();
       const savedStartLandmark = cloneLandmark(placementPreview.lineStartLandmark);
       const savedEndHit = placementPreview.lineEndHit?.clone?.() || null;
+      const savedFloorLocked = placementPreview.floorLocked !== false;
       disposePlacementPreview();
-      createLinePlacementPreview(savedStartHit, savedStartLandmark, nextColor, nextSize);
+      createLinePlacementPreview(savedStartHit, savedStartLandmark, nextColor, nextSize, savedFloorLocked);
       placementPreview.lineEndHit = savedEndHit;
     }
 
@@ -335,7 +379,7 @@ export function bootstrapApp() {
 
     if (hitPoint && contactLandmark) {
       placementPreview.lineEndHit = resolveLineEndpoint(
-        hitPoint,
+        previewTarget,
         contactLandmark,
         placementPreview.lineStartHit,
         placementPreview.lineStartLandmark
@@ -356,35 +400,51 @@ export function bootstrapApp() {
     if (shapeTypeEl.value === "line") {
       return ensureLinePlacementPreview(hitPoint, contactLandmark);
     }
-    const anchorHit = placementPreview?.anchorHit || anchoredPlacementHit(hitPoint);
+    const previewTarget = placementPreview?.mesh
+      ? resolvePlacementTarget(hitPoint, placementPreview.floorLocked)
+      : resolvePlacementTarget(hitPoint);
+    const anchorHit = placementPreview?.anchorHit || anchoredPlacementHit(previewTarget);
     if (!anchorHit) return null;
     const nextShape = shapeTypeEl.value;
     const nextColor = colorInputEl.value;
     const nextSize = Number(sizeInputEl.value);
+    const floorLocked = previewTarget?.floorLocked !== false;
 
     if (!placementPreview?.mesh) {
       const mesh = world.buildMesh(nextShape, nextSize, nextColor);
       mesh.userData.previewShape = nextShape;
       mesh.userData.previewSize = nextSize;
       world.scene.add(mesh);
-      placementPreview = { shape: nextShape, mesh, anchorHit: anchorHit.clone() };
+      placementPreview = {
+        shape: nextShape,
+        mesh,
+        anchorHit: anchorHit.clone(),
+        floorLocked,
+      };
     }
 
     if (placementPreview.mesh.userData.previewSize !== nextSize) {
       const fixedAnchorHit = placementPreview.anchorHit.clone();
+      const fixedFloorLocked = placementPreview.floorLocked !== false;
       disposePlacementPreview();
       const mesh = world.buildMesh(nextShape, nextSize, nextColor);
       mesh.userData.previewShape = nextShape;
       mesh.userData.previewSize = nextSize;
       world.scene.add(mesh);
-      placementPreview = { shape: nextShape, mesh, anchorHit: fixedAnchorHit };
+      placementPreview = {
+        shape: nextShape,
+        mesh,
+        anchorHit: fixedAnchorHit,
+        floorLocked: fixedFloorLocked,
+      };
     }
 
     const previewMesh = placementPreview.mesh;
     syncPreviewMeshAppearance(previewMesh, nextShape, nextColor);
-    previewMesh.position.x = placementPreview.anchorHit.x;
-    previewMesh.position.z = placementPreview.anchorHit.z;
-    alignMeshToGround(previewMesh);
+    previewMesh.position.copy(placementPreview.anchorHit);
+    if (placementPreview.floorLocked !== false) {
+      alignMeshToGround(previewMesh);
+    }
     return placementPreview;
   }
 
@@ -401,6 +461,7 @@ export function bootstrapApp() {
     mesh.material.depthWrite = true;
     mesh.userData.shape = shapeTypeEl.value;
     mesh.userData.baseSize = Number(sizeInputEl.value);
+    mesh.userData.floorLocked = placementPreview.floorLocked !== false;
     delete mesh.userData.previewShape;
     delete mesh.userData.previewSize;
     if (placementPreview.shape === "line") {
@@ -466,7 +527,7 @@ export function bootstrapApp() {
   }
 
   function updateSelectionFeedback(now) {
-    const focusMesh = rotationSession?.mesh || transformSession?.mesh;
+    const focusMesh = rotationSession?.mesh || transformSession?.mesh || dragSession?.mesh || activeMesh;
     if (!focusMesh || activeMesh !== focusMesh) {
       selectionRing.visible = false;
       rotationGuide.visible = false;
@@ -476,14 +537,17 @@ export function bootstrapApp() {
     const pulseStartAt = selectionRing.userData.pulseStartAt ?? now;
     const pulseT = Math.max(0, now - pulseStartAt);
     const entryBoost = Math.max(0, 1 - pulseT / 220);
-    const idlePulse = 1 + Math.sin(now * 0.01) * 0.05;
-    const targetRadius = Math.max(0.48, meshSelectionRadius(activeMesh) - TRANSFORM_SELECT_BUFFER * 0.4);
-    const scale = (targetRadius / SELECTION_RING_BASE_RADIUS) * (idlePulse + entryBoost * 0.35);
+    const activeTransform = Boolean(rotationSession?.mesh === activeMesh || transformSession?.mesh === activeMesh || dragSession?.mesh === activeMesh);
+    const idlePulse = activeTransform ? 1 + Math.sin(now * 0.01) * 0.05 : 1;
+    const targetRadius = Math.max(0.48, meshSelectionRadius(activeMesh) - TRANSFORM_SELECT_BUFFER * (activeTransform ? 0.4 : 0.18));
+    const scale = (targetRadius / SELECTION_RING_BASE_RADIUS) * (idlePulse + (activeTransform ? entryBoost * 0.35 : entryBoost * 0.16));
 
     selectionRing.visible = true;
-    selectionRing.position.set(activeMesh.position.x, 0.02, activeMesh.position.z);
+    selectionRing.position.set(activeMesh.position.x, Math.max(0.02, activeMesh.position.y * 0.06), activeMesh.position.z);
     selectionRing.scale.setScalar(scale);
-    selectionRing.material.opacity = 0.46 + entryBoost * 0.28 + (idlePulse - 1) * 1.8;
+    selectionRing.material.opacity = activeTransform
+      ? 0.46 + entryBoost * 0.28 + (idlePulse - 1) * 1.8
+      : 0.34 + entryBoost * 0.16;
 
     if (rotationSession?.mesh === activeMesh) {
       const guideLength = Math.max(0.9, meshSelectionRadius(activeMesh) * 0.85);
@@ -921,6 +985,27 @@ export function bootstrapApp() {
     return thumbExtended && curledCount >= 3 && thumbBelowPalm && thumbBelowFingers;
   }
 
+  function isDirectPinchPose(hand) {
+    if (!hand) return false;
+    const scale = palmScale(hand);
+    const wrist = hand[0];
+    const palmCenter = {
+      x: (hand[0].x + hand[5].x + hand[9].x + hand[13].x + hand[17].x) / 5,
+      y: (hand[0].y + hand[5].y + hand[9].y + hand[13].y + hand[17].y) / 5,
+      z: (hand[0].z + hand[5].z + hand[9].z + hand[13].z + hand[17].z) / 5,
+    };
+    const thumbTip = hand[4];
+    const indexTip = hand[8];
+    const thumbIp = hand[3];
+    const indexDip = hand[7];
+    const pinchMid = midpointLandmark(thumbTip, indexTip);
+    const pinchRatio = lmkDist(thumbTip, indexTip) / scale;
+    const pinchFrontOfPalm = pinchMid ? (lmkDist(pinchMid, palmCenter) / scale) > 0.4 : false;
+    const thumbLeading = lmkDist(thumbTip, wrist) >= lmkDist(thumbIp, wrist) * 0.98;
+    const indexLeading = lmkDist(indexTip, wrist) >= lmkDist(indexDip, wrist) * 0.98;
+    return pinchRatio < 0.28 && pinchFrontOfPalm && thumbLeading && indexLeading;
+  }
+
   function isPointPose(hand) {
     if (!hand) return false;
     const scale = palmScale(hand);
@@ -1004,6 +1089,128 @@ export function bootstrapApp() {
     return mesh?.material?.color ? `#${mesh.material.color.getHexString()}` : "#7cf7e4";
   }
 
+  function meshScaleValue(mesh) {
+    if (!mesh) return 1;
+    return (Math.abs(mesh.scale.x || 1) + Math.abs(mesh.scale.y || 1) + Math.abs(mesh.scale.z || 1)) / 3;
+  }
+
+  function meshScaleAxisValue(mesh, axis = "x") {
+    if (!mesh?.scale) return 1;
+    return Math.abs(mesh.scale[axis] || 1);
+  }
+
+  function meshPositionAxisValue(mesh, axis = "x") {
+    if (!mesh?.position) return 0;
+    return mesh.position[axis] || 0;
+  }
+
+  function meshRotationDegrees(mesh) {
+    if (!mesh) return 0;
+    return THREE.MathUtils.radToDeg(mesh.rotation.y || 0);
+  }
+
+  function meshRotationAxisDegrees(mesh, axis = "y") {
+    if (!mesh?.rotation) return 0;
+    return THREE.MathUtils.radToDeg(mesh.rotation[axis] || 0);
+  }
+
+  function clampScaleValue(value) {
+    return clamp(Number(value || 1), MIN_MESH_SCALE, MAX_MESH_SCALE);
+  }
+
+  function normalizeRotationDegrees(value) {
+    let degrees = Number(value || 0);
+    while (degrees > 180) degrees -= 360;
+    while (degrees < -180) degrees += 360;
+    return degrees;
+  }
+
+  function findMeshBySerial(objectSerial) {
+    return placedMeshes.find((item) => Number(item.userData?.objectSerial) === Number(objectSerial)) || null;
+  }
+
+  function updateMeshScaleValue(objectSerial, rawValue) {
+    const mesh = findMeshBySerial(objectSerial);
+    if (!mesh) return null;
+    const nextScale = clampScaleValue(rawValue);
+    mesh.scale.setScalar(nextScale);
+    if (mesh.userData?.shape !== "line") {
+      alignMeshToGround(mesh);
+    }
+    updateMeshMetadata(mesh);
+    updateGeometryMetrics(
+      mesh.userData.shape || shapeTypeEl.value,
+      Number(mesh.userData.baseSize || sizeInputEl.value) * nextScale,
+      mesh
+    );
+    refreshDebug();
+    return nextScale;
+  }
+
+  function translateLineByDelta(mesh, axis, nextValue) {
+    const currentValue = mesh.position?.[axis] || 0;
+    const delta = Number(nextValue) - currentValue;
+    const start = Array.isArray(mesh.userData?.lineStart) ? new THREE.Vector3().fromArray(mesh.userData.lineStart) : null;
+    const end = Array.isArray(mesh.userData?.lineEnd) ? new THREE.Vector3().fromArray(mesh.userData.lineEnd) : null;
+    if (!start || !end) {
+      mesh.position[axis] = Number(nextValue);
+      return;
+    }
+    start[axis] += delta;
+    end[axis] += delta;
+    applyLineEndpoints(mesh, start, end, Number(mesh.userData.baseSize || sizeInputEl.value));
+  }
+
+  function updateMeshPositionAxisValue(objectSerial, axis, rawValue) {
+    const mesh = findMeshBySerial(objectSerial);
+    if (!mesh?.position) return null;
+    const nextValue = Number(rawValue || 0);
+    if (mesh.userData?.shape === "line") {
+      translateLineByDelta(mesh, axis, nextValue);
+    } else {
+      mesh.position[axis] = nextValue;
+    }
+    updateMeshMetadata(mesh);
+    refreshDebug();
+    return nextValue;
+  }
+
+  function updateMeshScaleAxisValue(objectSerial, axis, rawValue) {
+    const mesh = findMeshBySerial(objectSerial);
+    if (!mesh?.scale) return null;
+    const nextScale = clampScaleValue(rawValue);
+    mesh.scale[axis] = nextScale;
+    if (mesh.userData?.shape !== "line") {
+      alignMeshToGround(mesh);
+    }
+    updateMeshMetadata(mesh);
+    updateGeometryMetrics(
+      mesh.userData.shape || shapeTypeEl.value,
+      Number(mesh.userData.baseSize || sizeInputEl.value) * meshScaleValue(mesh),
+      mesh
+    );
+    refreshDebug();
+    return nextScale;
+  }
+
+  function updateMeshRotationValue(objectSerial, rawValue) {
+    const mesh = findMeshBySerial(objectSerial);
+    if (!mesh) return null;
+    const degrees = normalizeRotationDegrees(rawValue);
+    mesh.rotation.y = THREE.MathUtils.degToRad(degrees);
+    refreshDebug();
+    return degrees;
+  }
+
+  function updateMeshRotationAxisValue(objectSerial, axis, rawValue) {
+    const mesh = findMeshBySerial(objectSerial);
+    if (!mesh?.rotation) return null;
+    const degrees = normalizeRotationDegrees(rawValue);
+    mesh.rotation[axis] = THREE.MathUtils.degToRad(degrees);
+    refreshDebug();
+    return degrees;
+  }
+
   function buildObjectEditorValue(mesh) {
     return `shape=${mesh.userData?.shape || "cube"} color=${colorHex(mesh)}`;
   }
@@ -1068,7 +1275,7 @@ export function bootstrapApp() {
   }
 
   function alignMeshToGround(mesh) {
-    if (mesh?.userData?.shape === "line") return;
+    if (mesh?.userData?.shape === "line" || mesh?.userData?.floorLocked === false) return;
     if (!mesh?.geometry) return;
     mesh.geometry.computeBoundingBox?.();
     const bbox = mesh.geometry.boundingBox;
@@ -1138,7 +1345,7 @@ export function bootstrapApp() {
 
     objectCountEl.textContent = String(placedMeshes.length);
     if (!placedMeshes.length) {
-      objectListEl.innerHTML = `<div class="object-empty">Place an object to start an editable list, then type updates like <code>shape=line color=#ff8c64</code>.</div>`;
+      objectListEl.innerHTML = `<div class="object-empty">Place an object to open a compact transform inspector here.</div>`;
       return;
     }
 
@@ -1147,6 +1354,43 @@ export function bootstrapApp() {
       const label = mesh.userData.label;
       const shape = mesh.userData?.shape || "cube";
       const color = colorHex(mesh);
+      const posXValue = meshPositionAxisValue(mesh, "x").toFixed(2);
+      const posYValue = meshPositionAxisValue(mesh, "y").toFixed(2);
+      const posZValue = meshPositionAxisValue(mesh, "z").toFixed(2);
+      const scaleXValue = meshScaleAxisValue(mesh, "x").toFixed(2);
+      const scaleYValue = meshScaleAxisValue(mesh, "y").toFixed(2);
+      const scaleZValue = meshScaleAxisValue(mesh, "z").toFixed(2);
+      const rotationXValue = normalizeRotationDegrees(meshRotationAxisDegrees(mesh, "x")).toFixed(0);
+      const rotationYValue = normalizeRotationDegrees(meshRotationAxisDegrees(mesh, "y")).toFixed(0);
+      const rotationZValue = normalizeRotationDegrees(meshRotationAxisDegrees(mesh, "z")).toFixed(0);
+      const inspector = mesh === activeMesh ? `
+        <div class="transform-card">
+          <div class="transform-grid transform-grid-head">
+            <span class="transform-spacer"></span>
+            <span>X</span>
+            <span>Y</span>
+            <span>Z</span>
+          </div>
+          <div class="transform-grid">
+            <span class="transform-label">Position</span>
+            <input class="transform-field" type="number" step="0.01" data-transform="position" data-axis="x" data-object-serial="${mesh.userData.objectSerial}" value="${escapeHtml(posXValue)}" />
+            <input class="transform-field" type="number" step="0.01" data-transform="position" data-axis="y" data-object-serial="${mesh.userData.objectSerial}" value="${escapeHtml(posYValue)}" />
+            <input class="transform-field" type="number" step="0.01" data-transform="position" data-axis="z" data-object-serial="${mesh.userData.objectSerial}" value="${escapeHtml(posZValue)}" />
+          </div>
+          <div class="transform-grid">
+            <span class="transform-label">Rotation</span>
+            <input class="transform-field" type="number" step="1" data-transform="rotation" data-axis="x" data-object-serial="${mesh.userData.objectSerial}" value="${escapeHtml(rotationXValue)}" />
+            <input class="transform-field" type="number" step="1" data-transform="rotation" data-axis="y" data-object-serial="${mesh.userData.objectSerial}" value="${escapeHtml(rotationYValue)}" />
+            <input class="transform-field" type="number" step="1" data-transform="rotation" data-axis="z" data-object-serial="${mesh.userData.objectSerial}" value="${escapeHtml(rotationZValue)}" />
+          </div>
+          <div class="transform-grid">
+            <span class="transform-label">Scale</span>
+            <input class="transform-field" type="number" min="${MIN_MESH_SCALE}" max="${MAX_MESH_SCALE}" step="0.01" data-transform="scale" data-axis="x" data-object-serial="${mesh.userData.objectSerial}" value="${escapeHtml(scaleXValue)}" />
+            <input class="transform-field" type="number" min="${MIN_MESH_SCALE}" max="${MAX_MESH_SCALE}" step="0.01" data-transform="scale" data-axis="y" data-object-serial="${mesh.userData.objectSerial}" value="${escapeHtml(scaleYValue)}" />
+            <input class="transform-field" type="number" min="${MIN_MESH_SCALE}" max="${MAX_MESH_SCALE}" step="0.01" data-transform="scale" data-axis="z" data-object-serial="${mesh.userData.objectSerial}" value="${escapeHtml(scaleZValue)}" />
+          </div>
+        </div>
+      ` : "";
       return `
         <article class="object-item${mesh === activeMesh ? " is-active" : ""}" data-object-serial="${mesh.userData.objectSerial}">
           <div class="object-item-head">
@@ -1154,16 +1398,7 @@ export function bootstrapApp() {
             <strong class="object-label">${escapeHtml(label)}</strong>
             <span class="object-state">${mesh === activeMesh ? "active" : shape}</span>
           </div>
-          <label class="object-expression">
-            <span class="object-equals">=</span>
-            <input
-              class="object-editor"
-              type="text"
-              spellcheck="false"
-              data-object-serial="${mesh.userData.objectSerial}"
-              value="${escapeHtml(buildObjectEditorValue(mesh))}"
-            />
-          </label>
+          ${inspector}
         </article>
       `;
     }).join("");
@@ -1250,13 +1485,13 @@ export function bootstrapApp() {
     ctx.restore();
   }
 
-  function drawDebug(hands, interaction) {
+  function drawDebug(hands, interaction, visualHands = null) {
     ctx.clearRect(0, 0, overlayEl.width, overlayEl.height);
     if (!hands?.length) return;
-    const visualHands = smoothHandsForOverlay(hands);
+    const renderedHands = visualHands || smoothHandsForOverlay(hands);
 
     // Minimal futuristic overlay with subtle contrast.
-    for (const handState of visualHands) {
+    for (const handState of renderedHands) {
       const hand = handState?.landmarks;
       if (!hand) continue;
 
@@ -1425,6 +1660,70 @@ export function bootstrapApp() {
     mesh.material?.dispose?.();
   }
 
+  function beginDragSession(mesh, clientX, clientY, pointerId = null) {
+    if (!mesh) return false;
+    const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -mesh.position.y);
+    const intersection = world.projectClientToPlane(clientX, clientY, dragPlane);
+    if (!intersection) return false;
+    dragSession = {
+      mesh,
+      plane: dragPlane,
+      pointerId,
+      startPosition: mesh.position.clone(),
+      pointerOffset: intersection.clone().sub(mesh.position),
+      lineStart: Array.isArray(mesh.userData?.lineStart) ? new THREE.Vector3().fromArray(mesh.userData.lineStart) : null,
+      lineEnd: Array.isArray(mesh.userData?.lineEnd) ? new THREE.Vector3().fromArray(mesh.userData.lineEnd) : null,
+    };
+    if (typeof world.setControlsEnabled === "function") {
+      world.setControlsEnabled(false);
+    }
+    return true;
+  }
+
+  function updateDragSession(clientX, clientY) {
+    if (!dragSession?.mesh) return false;
+    const intersection = world.projectClientToPlane(clientX, clientY, dragSession.plane);
+    if (!intersection) return false;
+    const targetPosition = intersection.clone().sub(dragSession.pointerOffset);
+
+    if (dragSession.mesh.userData?.shape === "line" && dragSession.lineStart && dragSession.lineEnd) {
+      const delta = targetPosition.clone().sub(dragSession.startPosition);
+      applyLineEndpoints(
+        dragSession.mesh,
+        dragSession.lineStart.clone().add(delta),
+        dragSession.lineEnd.clone().add(delta),
+        Number(dragSession.mesh.userData.baseSize || sizeInputEl.value)
+      );
+      dragSession.mesh.position.copy(targetPosition);
+    } else {
+      dragSession.mesh.position.x = targetPosition.x;
+      dragSession.mesh.position.z = targetPosition.z;
+      alignMeshToGround(dragSession.mesh);
+    }
+
+    updateMeshMetadata(dragSession.mesh);
+    selectionRing.position.set(dragSession.mesh.position.x, 0.02, dragSession.mesh.position.z);
+    refreshDebug();
+    return true;
+  }
+
+  function endDragSession() {
+    if (!dragSession) return;
+    const draggedMesh = dragSession.mesh;
+    dragSession = null;
+    if (typeof world.setControlsEnabled === "function") {
+      world.setControlsEnabled(true);
+    }
+    if (draggedMesh) {
+      setStatus(`Dragged ${draggedMesh.userData?.label || "object"}`, "ok");
+      renderObjectList();
+    }
+  }
+
+  function clearDragIntent() {
+    dragIntent = null;
+  }
+
   function enforceMeshBudget() {
     while (placedMeshes.length > MAX_MESHES) {
       const old = placedMeshes.shift();
@@ -1464,6 +1763,8 @@ export function bootstrapApp() {
   }
 
   function clearAll() {
+    clearDragIntent();
+    endDragSession();
     transformSession = null;
     rotationSession = null;
     nextObjectSerial = 0;
@@ -1481,10 +1782,12 @@ export function bootstrapApp() {
       objectSerial: m.userData.objectSerial || null,
       shape: m.userData.shape || "cube",
       baseSize: m.userData.baseSize || 1,
+      floorLocked: m.userData.floorLocked !== false,
       color: `#${m.material.color.getHexString()}`,
       lineStart: Array.isArray(m.userData.lineStart) ? m.userData.lineStart : null,
       lineEnd: Array.isArray(m.userData.lineEnd) ? m.userData.lineEnd : null,
       position: m.position.toArray(),
+      rotation: [m.rotation.x, m.rotation.y, m.rotation.z],
       rotationY: m.rotation.y,
       scale: m.scale.toArray(),
     }));
@@ -1518,13 +1821,19 @@ export function bootstrapApp() {
         : world.buildMesh(shape, size, color);
       if (shape !== "line") {
         mesh.position.fromArray(item.position || [0, 0.5, 0]);
-        mesh.rotation.y = Number(item.rotationY || 0);
       }
+      if (Array.isArray(item.rotation)) mesh.rotation.set(
+        Number(item.rotation[0] || 0),
+        Number(item.rotation[1] || 0),
+        Number(item.rotation[2] || 0)
+      );
+      else mesh.rotation.y = Number(item.rotationY || 0);
       if (Array.isArray(item.scale)) mesh.scale.fromArray(item.scale);
       if (item.objectSerial) mesh.userData.objectSerial = Number(item.objectSerial);
       if (item.label) mesh.userData.label = item.label;
       mesh.userData.shape = shape;
       mesh.userData.baseSize = size;
+      mesh.userData.floorLocked = item.floorLocked !== false;
       if (Array.isArray(item.lineStart)) mesh.userData.lineStart = item.lineStart;
       if (Array.isArray(item.lineEnd)) mesh.userData.lineEnd = item.lineEnd;
       ensureMeshIdentity(mesh);
@@ -1561,8 +1870,11 @@ export function bootstrapApp() {
       lastInferAt = now;
       const results = handLandmarker.detectForVideo(webcamEl, now);
       const hands = sortHandsForTracking(results?.landmarks || []);
+      const visualHands = smoothHandsForOverlay(hands);
       const primary = hands[0] || null;
       const secondary = hands[1] || null;
+      const primaryVisual = visualHands[0]?.landmarks || primary;
+      const secondaryVisual = visualHands[1]?.landmarks || secondary;
       const handCount = hands.length;
       const baseInteraction = pipeline.update(primary, secondary);
       const autoMode = handCount >= 2 ? "transform" : "spawn";
@@ -1570,11 +1882,17 @@ export function bootstrapApp() {
       const secondaryPalm = secondary ? palmCenterLandmark(secondary) : null;
       const primaryPalmHitRaw = primaryPalm ? world.projectToGround(primaryPalm) : null;
       const secondaryPalmHitRaw = secondaryPalm ? world.projectToGround(secondaryPalm) : null;
-      const pinchContact = primary ? midpointLandmark(primary[4], primary[8]) : null;
-      const primaryContactLandmark = pinchContact || primary?.[8] || null;
-      const pinchHitRaw = pinchContact ? world.projectToGround(pinchContact) : null;
-      const primaryIndexHitRaw = primary?.[8] ? world.projectToGround(primary[8]) : null;
-      const secondaryIndexHitRaw = secondary?.[8] ? world.projectToGround(secondary[8]) : null;
+      const pinchContact = primaryVisual ? midpointLandmark(primaryVisual[4], primaryVisual[8]) : null;
+      const primaryContactLandmark = pinchContact || primaryVisual?.[8] || null;
+      const placementAnchor = placementPreview?.shape === "line"
+        ? (placementPreview.lineStartHit || world.getViewTarget())
+        : (placementPreview?.anchorHit || world.getViewTarget());
+      const pinchPlacementRaw = primaryContactLandmark
+        ? world.projectToPlacement(primaryContactLandmark, placementAnchor)
+        : null;
+      const pinchHitRaw = pinchPlacementRaw?.point || null;
+      const primaryIndexHitRaw = primaryVisual?.[8] ? world.projectToGround(primaryVisual[8]) : null;
+      const secondaryIndexHitRaw = secondaryVisual?.[8] ? world.projectToGround(secondaryVisual[8]) : null;
 
       smoothedPalm = smoothPoint(smoothedPalm, primaryPalmHitRaw, 0.24);
       smoothedSecondaryPalm = smoothPoint(smoothedSecondaryPalm, secondaryPalmHitRaw, 0.24);
@@ -1585,6 +1903,12 @@ export function bootstrapApp() {
       const primaryPalmHit = primaryPalmHitRaw || smoothedPalm;
       const secondaryPalmHit = secondaryPalmHitRaw || smoothedSecondaryPalm;
       const pinchHit = pinchHitRaw || smoothedPinch;
+      const pinchPlacement = pinchHit
+        ? {
+          point: pinchHit,
+          floorLocked: pinchPlacementRaw?.floorLocked ?? (placementPreview?.floorLocked ?? true),
+        }
+        : null;
       const primaryIndexHit = primaryIndexHitRaw || smoothedPrimaryIndex;
       const secondaryIndexHit = secondaryIndexHitRaw || smoothedSecondaryIndex;
       const palmMidpoint = primaryPalmHit && secondaryPalmHit
@@ -1637,30 +1961,25 @@ export function bootstrapApp() {
         transformEndedThisFrame = true;
       } else if (transformSession || rotationSession) {
         if (handCount < 2) {
-          if (transformMissingHandSince == null) transformMissingHandSince = now;
-          if ((now - transformMissingHandSince) >= TRANSFORM_HAND_RETURN_MS) {
-            endTransformSession("Transform released");
-            pendingTransformCandidate = null;
-            pendingTransformSince = null;
-            transformMissingHandSince = null;
-            transformEndedThisFrame = true;
-          }
+          endTransformSession("Transform ended: hand lost");
+          pendingTransformCandidate = null;
+          pendingTransformSince = null;
+          transformMissingHandSince = null;
+          transformEndedThisFrame = true;
         } else {
           handReturnThisFrame = transformMissingHandSince != null;
           transformMissingHandSince = null;
         }
       }
-      const transformPausedForMissingHand = Boolean((transformSession || rotationSession) && handCount < 2 && !transformEndedThisFrame);
-
       const interaction = {
         ...baseInteraction,
         handsDetected: handCount > 0,
         handCount,
-        mode: transformPausedForMissingHand ? "transform" : autoMode,
+        mode: autoMode,
         pointPose: twoHandPointPose,
       };
 
-      drawDebug(hands, interaction);
+      drawDebug(hands, interaction, visualHands);
       appState.interaction = {
         ...interaction,
         signal,
@@ -1673,8 +1992,11 @@ export function bootstrapApp() {
       pipeline.setAlpha(dynamicAlpha);
       const conjureCooldownActive = autoMode === "spawn" && !placementPreview && (now - lastSpawnAt) < SPAWN_COOLDOWN_MS;
 
-      if (autoMode === "spawn" && primary && !transformEndedThisFrame && !transformPausedForMissingHand) {
-        const pinchActive = interaction.pinch && signal !== SIGNALS.FIST_DELETE;
+      if (autoMode === "spawn" && primary && !transformEndedThisFrame) {
+        const directPinchPose = isDirectPinchPose(primary);
+        const pinchActive =
+          (((interaction.pinch && (interaction.pinchStrength || 0) >= 0.4) || directPinchPose)) &&
+          signal !== SIGNALS.FIST_DELETE;
         const pinchStart = pinchActive && !prevPinch;
         const pulseRadius = pinchPulseRadius(interaction.pinchStrength || 0);
         const placementPulseActive = pinchActive && pulseRadius >= PLACEMENT_PULSE_TRIGGER_RADIUS;
@@ -1685,11 +2007,11 @@ export function bootstrapApp() {
         const hadLineDraft = placementPreview?.shape === "line";
 
         if (lineToolActive) {
-          if (!hadLineDraft && canSpawn && pinchHit && primaryContactLandmark && (pinchStart || placementPulseTrigger)) {
-            ensurePlacementPreview(pinchHit, primaryContactLandmark);
+          if (!hadLineDraft && canSpawn && pinchPlacement && primaryContactLandmark && (pinchStart || placementPulseTrigger)) {
+            ensurePlacementPreview(pinchPlacement, primaryContactLandmark);
             setStatus("Line start placed. Move to the next point and pinch again to finish", "ok");
           } else if (hadLineDraft) {
-            ensurePlacementPreview(pinchHit, primaryContactLandmark);
+            ensurePlacementPreview(pinchPlacement, primaryContactLandmark);
             if (pinchStart && placementPreview?.lineEndHit) {
               if (confirmPlacementPreview(now)) {
                 lastSpawnAt = now;
@@ -1700,10 +2022,10 @@ export function bootstrapApp() {
           const shouldConjurePreview =
             !placementPreview &&
             canSpawn &&
-            pinchHit &&
+            pinchPlacement &&
             (pinchStart || placementPulseTrigger);
           if (shouldConjurePreview) {
-            ensurePlacementPreview(pinchHit);
+            ensurePlacementPreview(pinchPlacement);
             lastSpawnAt = now;
           } else if (placementPreview) {
             ensurePlacementPreview();
@@ -1840,9 +2162,6 @@ export function bootstrapApp() {
           disposePlacementPreview();
         }
         setIntent("waiting for hands", "idle");
-      } else if (transformPausedForMissingHand) {
-        setStatus("Return second hand to camera to continue transform", "idle");
-        setIntent("return second hand to camera", "idle");
       } else if (transformEndedThisFrame && thumbsUpRelease) {
         setIntent("ending transform", "ok");
       } else if (autoMode === "spawn") {
@@ -1939,6 +2258,8 @@ export function bootstrapApp() {
     if (rafId) cancelAnimationFrame(rafId);
     if (stream) stream.getTracks().forEach((t) => t.stop());
     webcamEl.srcObject = null;
+    clearDragIntent();
+    endDragSession();
     transformSession = null;
     rotationSession = null;
     setActiveMesh(null);
@@ -2016,7 +2337,7 @@ export function bootstrapApp() {
   colorInputEl?.addEventListener("change", applySidebarShapeColorToSelection);
 
   objectListEl?.addEventListener("click", (event) => {
-    if (event.target.closest(".object-editor")) return;
+    if (event.target.closest("input")) return;
     const row = event.target.closest(".object-item[data-object-serial]");
     if (!row) return;
     const mesh = placedMeshes.find((item) => Number(item.userData?.objectSerial) === Number(row.dataset.objectSerial));
@@ -2034,21 +2355,113 @@ export function bootstrapApp() {
     setActiveMesh(mesh);
   });
 
-  objectListEl?.addEventListener("keydown", (event) => {
-    const editor = event.target.closest(".object-editor");
-    if (!editor) return;
-    if (event.key === "Enter") {
-      event.preventDefault();
-      applyObjectEditorValue(editor.dataset.objectSerial, editor.value);
-      editor.blur();
+  function syncObjectTransformInputs(target, objectSerial) {
+    const row = target.closest(".object-item[data-object-serial]");
+    if (!row) return;
+    const mesh = findMeshBySerial(objectSerial);
+    if (!mesh) return;
+    row.querySelector('.transform-field[data-transform="position"][data-axis="x"]')?.setAttribute("value", meshPositionAxisValue(mesh, "x").toFixed(2));
+    row.querySelector('.transform-field[data-transform="position"][data-axis="y"]')?.setAttribute("value", meshPositionAxisValue(mesh, "y").toFixed(2));
+    row.querySelector('.transform-field[data-transform="position"][data-axis="z"]')?.setAttribute("value", meshPositionAxisValue(mesh, "z").toFixed(2));
+    row.querySelector('.transform-field[data-transform="rotation"][data-axis="x"]')?.setAttribute("value", normalizeRotationDegrees(meshRotationAxisDegrees(mesh, "x")).toFixed(0));
+    row.querySelector('.transform-field[data-transform="rotation"][data-axis="y"]')?.setAttribute("value", normalizeRotationDegrees(meshRotationAxisDegrees(mesh, "y")).toFixed(0));
+    row.querySelector('.transform-field[data-transform="rotation"][data-axis="z"]')?.setAttribute("value", normalizeRotationDegrees(meshRotationAxisDegrees(mesh, "z")).toFixed(0));
+    row.querySelector('.transform-field[data-transform="scale"][data-axis="x"]')?.setAttribute("value", meshScaleAxisValue(mesh, "x").toFixed(2));
+    row.querySelector('.transform-field[data-transform="scale"][data-axis="y"]')?.setAttribute("value", meshScaleAxisValue(mesh, "y").toFixed(2));
+    row.querySelector('.transform-field[data-transform="scale"][data-axis="z"]')?.setAttribute("value", meshScaleAxisValue(mesh, "z").toFixed(2));
+    row.querySelectorAll(".transform-field").forEach((input) => {
+      const transform = input.dataset.transform;
+      const axis = input.dataset.axis;
+      if (transform === "position") input.value = meshPositionAxisValue(mesh, axis).toFixed(2);
+      if (transform === "rotation") input.value = normalizeRotationDegrees(meshRotationAxisDegrees(mesh, axis)).toFixed(0);
+      if (transform === "scale") input.value = meshScaleAxisValue(mesh, axis).toFixed(2);
+    });
+  }
+
+  objectListEl?.addEventListener("input", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) return;
+    const objectSerial = target.dataset.objectSerial;
+    if (!objectSerial) return;
+
+    if (!target.classList.contains("transform-field")) return;
+    const transform = target.dataset.transform;
+    const axis = target.dataset.axis || "x";
+
+    if (transform === "position") {
+      if (updateMeshPositionAxisValue(objectSerial, axis, target.value) == null) return;
+      syncObjectTransformInputs(target, objectSerial);
+      return;
+    }
+
+    if (transform === "rotation") {
+      if (updateMeshRotationAxisValue(objectSerial, axis, target.value) == null) return;
+      syncObjectTransformInputs(target, objectSerial);
+      return;
+    }
+
+    if (transform === "scale") {
+      if (updateMeshScaleAxisValue(objectSerial, axis, target.value) == null) return;
+      syncObjectTransformInputs(target, objectSerial);
     }
   });
 
   objectListEl?.addEventListener("change", (event) => {
-    const editor = event.target.closest(".object-editor");
-    if (!editor) return;
-    applyObjectEditorValue(editor.dataset.objectSerial, editor.value);
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) return;
+    const objectSerial = target.dataset.objectSerial;
+    if (!objectSerial) return;
+    const mesh = findMeshBySerial(objectSerial);
+    if (!mesh) return;
+    setStatus(`Updated ${mesh.userData.label}`, "ok");
   });
+
+  const stageCanvas = world.renderer?.domElement;
+
+  stageCanvas?.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || placementPreview) return;
+    const hit = world.pickObject(event.clientX, event.clientY, placedMeshes);
+    const mesh = hit?.object || null;
+    if (!mesh) return;
+    event.preventDefault();
+    setActiveMesh(mesh);
+    selectionRing.userData.pulseStartAt = performance.now();
+    clearDragIntent();
+    dragIntent = {
+      mesh,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+    };
+    stageCanvas.setPointerCapture?.(event.pointerId);
+  });
+
+  stageCanvas?.addEventListener("pointermove", (event) => {
+    if (dragIntent && !dragSession && event.pointerId === dragIntent.pointerId) {
+      const moved = Math.hypot(event.clientX - dragIntent.startX, event.clientY - dragIntent.startY);
+      if (moved >= 5) {
+        beginDragSession(dragIntent.mesh, event.clientX, event.clientY, event.pointerId);
+      }
+    }
+    if (!dragSession || (dragSession.pointerId != null && event.pointerId !== dragSession.pointerId)) return;
+    event.preventDefault();
+    updateDragSession(event.clientX, event.clientY);
+  });
+
+  const finishPointerDrag = (event) => {
+    if (dragIntent && event?.pointerId === dragIntent.pointerId) {
+      clearDragIntent();
+    }
+    if (!dragSession || (event?.pointerId != null && dragSession.pointerId != null && event.pointerId !== dragSession.pointerId)) {
+      if (event?.pointerId != null) stageCanvas?.releasePointerCapture?.(event.pointerId);
+      return;
+    }
+    stageCanvas?.releasePointerCapture?.(dragSession.pointerId);
+    endDragSession();
+  };
+
+  stageCanvas?.addEventListener("pointerup", finishPointerDrag);
+  stageCanvas?.addEventListener("pointercancel", finishPointerDrag);
 
   transformSnapModeEl.addEventListener("change", refreshDebug);
   navigationModeEl?.addEventListener("change", () => {

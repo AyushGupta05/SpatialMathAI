@@ -128,7 +128,9 @@ export function createWorld(container) {
   const raycaster = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
   const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  const placementPlane = new THREE.Plane();
   const lineUp = new THREE.Vector3(0, 1, 0);
+  const cameraForward = new THREE.Vector3();
 
   function buildMaterial(color) {
     const tone = new THREE.Color(color);
@@ -187,6 +189,60 @@ export function createWorld(container) {
     const hit = new THREE.Vector3();
     const ok = raycaster.ray.intersectPlane(groundPlane, hit);
     return ok ? hit : null;
+  }
+
+  function getViewTarget() {
+    return controls.target.clone();
+  }
+
+  function projectToPlacement(landmark, anchorPoint = null) {
+    ndc.set((1 - landmark.x) * 2 - 1, -(landmark.y * 2 - 1));
+    raycaster.setFromCamera(ndc, camera);
+    camera.getWorldDirection(cameraForward);
+
+    if (Math.abs(cameraForward.y) > 0.72) {
+      const hit = new THREE.Vector3();
+      const ok = raycaster.ray.intersectPlane(groundPlane, hit);
+      return ok ? { point: hit, floorLocked: true } : null;
+    }
+
+    const coplanarPoint = anchorPoint?.clone?.() || controls.target.clone();
+    placementPlane.setFromNormalAndCoplanarPoint(cameraForward.clone().normalize(), coplanarPoint);
+    const hit = new THREE.Vector3();
+    if (raycaster.ray.intersectPlane(placementPlane, hit)) {
+      return { point: hit, floorLocked: false };
+    }
+
+    const fallback = new THREE.Vector3();
+    const ok = raycaster.ray.intersectPlane(groundPlane, fallback);
+    return ok ? { point: fallback, floorLocked: true } : null;
+  }
+
+  function setRayFromClient(clientX, clientY) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    const x = ((clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1;
+    const y = -(((clientY - rect.top) / Math.max(1, rect.height)) * 2 - 1);
+    ndc.set(x, y);
+    raycaster.setFromCamera(ndc, camera);
+    return raycaster;
+  }
+
+  function projectClientToPlane(clientX, clientY, plane) {
+    const nextPlane = plane || groundPlane;
+    setRayFromClient(clientX, clientY);
+    const hit = new THREE.Vector3();
+    const ok = raycaster.ray.intersectPlane(nextPlane, hit);
+    return ok ? hit : null;
+  }
+
+  function pickObject(clientX, clientY, objects = []) {
+    setRayFromClient(clientX, clientY);
+    const intersections = raycaster.intersectObjects(objects, false);
+    return intersections[0] || null;
+  }
+
+  function setControlsEnabled(enabled) {
+    controls.enabled = Boolean(enabled);
   }
 
   function buildMesh(type, size, color) {
@@ -292,12 +348,17 @@ export function createWorld(container) {
     camera,
     renderer,
     projectToGround,
+    projectToPlacement,
+    getViewTarget,
+    projectClientToPlane,
+    pickObject,
     buildMesh,
     buildLineMesh,
     updateLineMesh,
     createSelectionRing,
     createRotationGuide,
     createPalmProxy,
+    setControlsEnabled,
     setNavigationMode,
     resetView,
   };
