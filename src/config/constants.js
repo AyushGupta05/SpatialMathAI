@@ -40,7 +40,7 @@ export const PLACEMENT_COLLISION_TOLERANCE = 0.01;
 export const PLACEMENT_NEAR_SNAP_BASE = 0.12;
 export const PLACEMENT_NEAR_SNAP_GAIN = 0.18;
 export const PLACEMENT_SURFACE_NUDGE_LIMIT = 6;
-export const SHAPE_OPTIONS = ["cube", "cuboid", "sphere", "cylinder", "line"];
+export const SHAPE_OPTIONS = ["cube", "cuboid", "sphere", "cylinder", "cone", "pyramid", "plane", "line"];
 export const SIGNALS = {
   FIST_DELETE: "fist_delete",
   POINT_ROTATE: "point_rotate",

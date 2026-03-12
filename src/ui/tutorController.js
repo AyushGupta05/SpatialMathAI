@@ -1,539 +1,94 @@
-/**
- * TutorController: Wires the question input, tutor chat, challenge panel,
- * scene builder, labels, and camera director into a coherent tutor experience.
- *
- * This is the main integration layer between the AI backend and the 3D frontend.
- */
-
-import { parseQuestion, askTutor, fetchChallenges, checkChallenge } from "../ai/client.js";
-import { buildSceneFromSpec, clearSceneSpecMeshes, highlightObjects, resetHighlights } from "../ai/sceneBuilder.js";
-import { initLabelRenderer, renderLabels, addLabelsFromSpec, clearLabels } from "../render/labels.js";
+import {
+  requestScenePlan,
+  evaluateBuild,
+  askTutor,
+  requestVoiceResponse,
+  fetchChallenges,
+  checkChallenge,
+} from "../ai/client.js";
+import { buildSceneSnapshotFromSuggestions, normalizeScenePlan } from "../ai/planSchema.js";
+import { initLabelRenderer, renderLabels, addLabel, clearLabels } from "../render/labels.js";
 import { CameraDirector } from "../render/cameraDirector.js";
 import { tutorState } from "../state/tutorState.js";
 
+let appContext = null;
 let world = null;
+let sceneApi = null;
 let cameraDirector = null;
-let currentMeshes = null; // Map<string, Mesh>
-let currentSpec = null;
-let pendingSpec = null; // For scene plan workflow
-
-// DOM refs (set in init)
-let questionInput, questionSubmit, questionStatus;
-let chatMessages, chatInput, chatSend;
-let hintBtn, hintCount, explainBtn;
-let stepIndicator, stepLabel, stepPrev, stepNext;
-let challengeList, scoreDisplay;
-let answerSection, answerInput, answerSubmit, answerFeedback;
-let sceneInfo, objectCount;
-let scenePlanSection, planSummary, planObjects, addAllBtn, stepByStepBtn, buildManuallyBtn;
-let voiceToggle;
+let assessmentTimer = null;
 let voiceEnabled = false;
+let activeChallenge = null;
 
-export function initTutorController(worldRef) {
-  world = worldRef;
-  cameraDirector = new CameraDirector(world.camera, world.controls);
+let questionInput;
+let questionSubmit;
+let questionStatus;
+let scenePlanSection;
+let planSummary;
+let buildSummary;
+let planObjects;
+let addAllBtn;
+let stepByStepBtn;
+let buildManuallyBtn;
+let buildStepsSection;
+let buildStepsList;
+let buildGoalChip;
+let challengePromptList;
+let voiceTranscript;
+let challengeList;
+let scoreDisplay;
+let chatMessages;
+let chatInput;
+let chatSend;
+let hintBtn;
+let hintCount;
+let explainBtn;
+let voiceToggle;
+let answerSection;
+let answerInput;
+let answerSubmit;
+let answerFeedback;
+let sceneInfo;
+let sceneValidation;
+let cameraBookmarkList;
+let objectCount;
+let stepIndicator;
+let stepLabel;
+let stepPrev;
+let stepNext;
 
-  // Initialize label renderer
-  const stageWrap = document.querySelector(".stage-wrap");
-  if (stageWrap) {
-    initLabelRenderer(stageWrap);
-  }
-
-  // Grab DOM refs
-  questionInput = document.getElementById("questionInput");
-  questionSubmit = document.getElementById("questionSubmit");
-  questionStatus = document.getElementById("questionStatus");
-  chatMessages = document.getElementById("chatMessages");
-  chatInput = document.getElementById("chatInput");
-  chatSend = document.getElementById("chatSend");
-  hintBtn = document.getElementById("hintBtn");
-  hintCount = document.getElementById("hintCount");
-  explainBtn = document.getElementById("explainBtn");
-  stepIndicator = document.getElementById("stepIndicator");
-  stepLabel = document.getElementById("stepLabel");
-  stepPrev = document.getElementById("stepPrev");
-  stepNext = document.getElementById("stepNext");
-  challengeList = document.getElementById("challengeList");
-  scoreDisplay = document.getElementById("scoreDisplay");
-  answerSection = document.getElementById("answerSection");
-  answerInput = document.getElementById("answerInput");
-  answerSubmit = document.getElementById("answerSubmit");
-  answerFeedback = document.getElementById("answerFeedback");
-  sceneInfo = document.getElementById("sceneInfo");
-  objectCount = document.getElementById("objectCount");
-  voiceToggle = document.getElementById("voiceToggle");
-  scenePlanSection = document.getElementById("scenePlanSection");
-  planSummary = document.getElementById("planSummary");
-  planObjects = document.getElementById("planObjects");
-  addAllBtn = document.getElementById("addAllBtn");
-  stepByStepBtn = document.getElementById("stepByStepBtn");
-  buildManuallyBtn = document.getElementById("buildManuallyBtn");
-
-  bindEvents();
-  loadChallenges();
-  setupTabNavigation();
-  initToastContainer();
-
-  // Subscribe to tutor state changes
-  tutorState.on("step", handleStepChange);
-  tutorState.on("phase", handlePhaseChange);
-
-  // Check for demo mode via URL param
-  if (new URLSearchParams(window.location.search).has("demo")) {
-    setTimeout(() => runDemoMode(), 800);
-  }
+function activePlan() {
+  return tutorState.plan;
 }
 
-function bindEvents() {
-  // Question submission
-  questionSubmit?.addEventListener("click", handleQuestionSubmit);
-  questionInput?.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleQuestionSubmit();
-    }
-  });
-
-  // Chat
-  chatSend?.addEventListener("click", handleChatSend);
-  chatInput?.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") handleChatSend();
-  });
-
-  // Tutor actions
-  hintBtn?.addEventListener("click", handleHint);
-  explainBtn?.addEventListener("click", handleExplain);
-
-  // Step navigation
-  stepPrev?.addEventListener("click", () => tutorState.prevStep());
-  stepNext?.addEventListener("click", () => {
-    if (!tutorState.nextStep()) {
-      // Reached end of steps
-      tutorState.setPhase("practice");
-    }
-  });
-
-  // Answer submission
-  answerSubmit?.addEventListener("click", handleAnswerSubmit);
-  answerInput?.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") handleAnswerSubmit();
-  });
-
-  // Voice toggle
-  voiceToggle?.addEventListener("click", () => {
-    voiceEnabled = !voiceEnabled;
-    voiceToggle.classList.toggle("is-active", voiceEnabled);
-  });
-
-  // Scene plan buttons
-  addAllBtn?.addEventListener("click", handleAddAll);
-  stepByStepBtn?.addEventListener("click", handleStepByStep);
-  buildManuallyBtn?.addEventListener("click", handleBuildManually);
-
-  // Demo button
-  document.getElementById("demoBtn")?.addEventListener("click", () => runDemoMode());
+function currentSnapshot() {
+  return sceneApi?.snapshot?.() || { objects: [], selectedObjectId: null };
 }
 
-function setupTabNavigation() {
-  const tabButtons = document.querySelectorAll(".panel-tab");
-  const tabContents = document.querySelectorAll(".tab-content");
-
-  tabButtons.forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const tabName = btn.dataset.tab;
-
-      // Update buttons
-      tabButtons.forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-
-      // Update content
-      tabContents.forEach((content) => {
-        content.classList.remove("active");
-      });
-      document.querySelector(`.tab-content[data-content="${tabName}"]`)?.classList.add("active");
-    });
-  });
-}
-
-// ============ QUESTION HANDLING ============
-
-async function handleQuestionSubmit() {
-  const question = questionInput?.value?.trim();
-  if (!question) return;
-
-  tutorState.setPhase("parsing");
-  setQuestionStatus("Asking Nova Pro to analyze your question...", "loading");
-  questionSubmit.disabled = true;
-
-  try {
-    const { sceneSpec } = await parseQuestion(question);
-
-    tutorState.setSceneSpec(sceneSpec);
-    tutorState.setPhase("scene_ready");
-
-    // Store the spec for the plan buttons to use
-    pendingSpec = sceneSpec;
-
-    // Clear previous scene
-    clearCurrentScene();
-
-    // Clear chat and show tutor intro
-    clearChat();
-    addChatMessage("system", `Processing: "${question}"`);
-    addChatMessage("tutor", `I've analyzed your geometry problem. I can help you understand the ${sceneSpec.questionType || "concept"} step by step. Choose how you'd like to proceed below.`);
-
-    // Show scene plan
-    showScenePlan(sceneSpec);
-    setQuestionStatus("", "hidden");
-
-  } catch (err) {
-    console.error("Question parse error:", err);
-    setQuestionStatus(`Error: ${err.message}`, "error");
-    showToast(`Failed to parse question: ${err.message}`, "error", 6000);
-    tutorState.setError(err.message);
-  } finally {
-    questionSubmit.disabled = false;
-  }
-}
-
-// ============ SCENE PLAN HANDLING ============
-
-function showScenePlan(sceneSpec) {
-  if (!scenePlanSection) return;
-
-  // Generate summary from question
-  const summary = sceneSpec.question || "Geometry problem";
-  planSummary.textContent = summary;
-
-  // List objects
-  planObjects.innerHTML = "";
-  sceneSpec.objects?.forEach((obj) => {
-    const li = document.createElement("li");
-    const shapeName = obj.shape.charAt(0).toUpperCase() + obj.shape.slice(1);
-    const params = Object.entries(obj.params)
-      .map(([k, v]) => `${k}=${v}`)
-      .join(", ");
-    li.textContent = `🔵 ${shapeName}: ${params}`;
-    planObjects.appendChild(li);
-  });
-
-  // Show scene plan section
-  scenePlanSection.classList.remove("hidden");
-}
-
-function buildSceneFromPlan(sceneSpec) {
-  // Clear and build the full scene
-  clearCurrentScene();
-
-  const result = buildSceneFromSpec(sceneSpec, world);
-  currentMeshes = result.meshes;
-  currentSpec = result.spec;
-
-  // Add labels
-  addLabelsFromSpec(world.scene, result.spec, currentMeshes);
-
-  // Animate camera
-  if (result.spec.camera) {
-    animateCamera(result.spec.camera.position, result.spec.camera.target);
-  }
-
-  // Update UI
-  updateSceneInfo(result.spec);
-  updateObjectCount(currentMeshes.size);
-
-  // Hide scene plan
-  scenePlanSection.classList.add("hidden");
-
-  // Show step indicator if there are steps
-  if (result.spec.answer?.steps?.length > 0) {
-    showStepIndicator(result.spec.answer.steps.length);
-    tutorState.setPhase("walkthrough");
-  }
-}
-
-async function handleAddAll() {
-  if (!pendingSpec) return;
-  buildSceneFromPlan(pendingSpec);
-  addChatMessage("tutor", "Great! I've set up the complete scene. Now let's walk through the solution together. Click the step arrows or use the buttons below to explore each step.");
-}
-
-async function handleStepByStep() {
-  if (!pendingSpec) return;
-  // For now, just build all and let them step through
-  // In a full implementation, could add objects one by one
-  buildSceneFromPlan(pendingSpec);
-  addChatMessage("tutor", "Perfect! I'll guide you through each step. Let's start from the beginning.");
-  // Auto-advance to first step
-  setTimeout(() => tutorState.goToStep(0), 500);
-}
-
-async function handleBuildManually() {
-  if (!pendingSpec) return;
-  // Hide the scene plan, switch to scene tab
-  scenePlanSection.classList.add("hidden");
-
-  // Switch to Scene tab
-  const sceneTab = document.querySelector('.panel-tab[data-tab="scene"]');
-  if (sceneTab) sceneTab.click();
-
-  addChatMessage("tutor", "Great! You're in builder mode. Use the Scene tab to create your own 3D representation. I'll verify your understanding as you go. Feel free to ask me any questions!");
-}
-
-// ============ CHAT ============
-
-async function handleChatSend() {
-  const msg = chatInput?.value?.trim();
-  if (!msg) return;
-
-  chatInput.value = "";
-  addChatMessage("user", msg);
-  tutorState.addMessage("user", msg);
-
-  // Show typing indicator
-  const typingEl = addChatMessage("tutor", "...");
-  typingEl.classList.add("loading-dots");
-
-  try {
-    let fullResponse = "";
-    await askTutor({
-      sceneSpec: currentSpec,
-      history: tutorState.history,
-      userMessage: msg,
-      phase: tutorState.phase,
-      currentStep: tutorState.currentStep,
-      hintsUsed: tutorState.hintsUsed,
-      onChunk: (chunk) => {
-        fullResponse += chunk;
-        typingEl.textContent = fullResponse;
-        typingEl.classList.remove("loading-dots");
-        scrollChatToBottom();
-      },
-    });
-
-    if (!fullResponse) {
-      typingEl.textContent = "I'm having trouble connecting. Please try again.";
-    }
-    typingEl.classList.remove("loading-dots");
-    tutorState.addMessage("tutor", fullResponse);
-
-    // Voice
-    if (voiceEnabled && fullResponse) {
-      speakText(fullResponse);
-    }
-  } catch (err) {
-    typingEl.textContent = `Error: ${err.message}`;
-    typingEl.classList.remove("loading-dots");
-  }
-}
-
-async function handleHint() {
-  if (!tutorState.useHint()) {
-    addChatMessage("system", "No more hints available!");
-    return;
-  }
-  updateHintCount();
-
-  chatInput.value = "Can you give me a hint?";
-  handleChatSend();
-}
-
-async function handleExplain() {
-  const step = tutorState.getCurrentStepData();
-  if (!step) {
-    chatInput.value = "Can you explain the current problem?";
-  } else {
-    chatInput.value = `Can you explain step ${tutorState.currentStep + 1}: "${step.text}"?`;
-  }
-  handleChatSend();
-}
-
-// ============ STEP NAVIGATION ============
-
-function handleStepChange({ step }) {
-  updateStepIndicator(step);
-  const stepData = tutorState.getCurrentStepData();
-  if (!stepData) return;
-
-  // Highlight relevant objects
-  if (currentMeshes && stepData.highlightObjects) {
-    highlightObjects(currentMeshes, stepData.highlightObjects);
-  }
-
-  // Show step explanation in chat
-  addChatMessage("system", `Step ${step + 1}: ${stepData.text}${stepData.formula ? ` (${stepData.formula})` : ""}`);
-}
-
-function handlePhaseChange({ phase }) {
-  // Show/hide answer section for practice mode
-  if (answerSection) {
-    answerSection.classList.toggle("hidden", phase !== "practice");
-  }
-
-  if (phase === "practice") {
-    addChatMessage("system", "Now it's your turn! Enter your answer below.");
-    if (currentMeshes) resetHighlights(currentMeshes);
-  }
-}
-
-// ============ CHALLENGES ============
-
-async function loadChallenges() {
-  try {
-    const { challenges } = await fetchChallenges();
-    renderChallengeList(challenges);
-  } catch {
-    if (challengeList) {
-      challengeList.innerHTML = '<p class="muted-text">Challenges will be available when the server is running.</p>';
-    }
-  }
-}
-
-function renderChallengeList(challenges) {
-  if (!challengeList) return;
-  challengeList.innerHTML = challenges.map((ch) => `
-    <div class="challenge-item" data-id="${ch.id}">
-      <p class="challenge-title">${ch.title}</p>
-      <div class="challenge-meta">
-        <span class="challenge-diff ${ch.difficulty}">${ch.difficulty}</span>
-        <span>${ch.category}</span>
-      </div>
-    </div>
-  `).join("");
-
-  // Bind click handlers
-  challengeList.querySelectorAll(".challenge-item").forEach((el) => {
-    el.addEventListener("click", () => {
-      const id = el.dataset.id;
-      const ch = challenges.find((c) => c.id === id);
-      if (ch) startChallenge(ch);
-    });
-  });
-}
-
-function startChallenge(challenge) {
-  // Mark active
-  challengeList?.querySelectorAll(".challenge-item").forEach((el) => {
-    el.classList.toggle("is-active", el.dataset.id === challenge.id);
-  });
-
-  tutorState.startChallenge(challenge.id, challenge.sceneSpec);
-
-  // Clear and build scene
-  clearCurrentScene();
-  const result = buildSceneFromSpec(challenge.sceneSpec, world);
-  currentMeshes = result.meshes;
-  currentSpec = result.spec;
-
-  addLabelsFromSpec(world.scene, result.spec, currentMeshes);
-
-  if (result.spec.camera) {
-    animateCamera(result.spec.camera.position, result.spec.camera.target);
-  }
-
-  updateSceneInfo(result.spec);
-  updateObjectCount(currentMeshes.size);
-
-  // Chat
-  clearChat();
-  addChatMessage("system", `Challenge: ${challenge.title}`);
-  addChatMessage("tutor", challenge.question);
-
-  // Show steps
-  if (result.spec.answer?.steps?.length > 0) {
-    showStepIndicator(result.spec.answer.steps.length);
-  }
-
-  // Show answer section
-  if (answerSection) answerSection.classList.remove("hidden");
-  if (answerFeedback) { answerFeedback.classList.add("hidden"); answerFeedback.textContent = ""; }
-  if (answerInput) answerInput.value = "";
-}
-
-async function handleAnswerSubmit() {
-  const answer = parseFloat(answerInput?.value);
-  if (isNaN(answer)) {
-    showAnswerFeedback("Please enter a valid number.", false);
-    return;
-  }
-
-  try {
-    const result = await checkChallenge(tutorState.challengeId, answer);
-    showAnswerFeedback(result.feedback, result.correct);
-
-    if (result.correct) {
-      tutorState.recordCorrect();
-      updateScore();
-    } else {
-      tutorState.recordIncorrect();
-    }
-  } catch (err) {
-    showAnswerFeedback(`Error checking answer: ${err.message}`, false);
-  }
-}
-
-// ============ UI HELPERS ============
-
-function clearCurrentScene() {
-  if (currentMeshes) {
-    clearSceneSpecMeshes(world, currentMeshes);
-    currentMeshes = null;
-  }
-  clearLabels(world.scene);
-  currentSpec = null;
-}
-
-function setQuestionStatus(text, type) {
+function setQuestionStatus(text = "", type = "hidden") {
   if (!questionStatus) return;
   questionStatus.textContent = text;
   questionStatus.className = "question-status";
-  if (type === "hidden" || !text) {
+  if (!text || type === "hidden") {
     questionStatus.classList.add("hidden");
-  } else if (type === "loading") {
-    questionStatus.classList.add("is-loading");
-    questionStatus.classList.remove("hidden");
-  } else if (type === "error") {
-    questionStatus.classList.add("is-error");
-    questionStatus.classList.remove("hidden");
+    return;
   }
+  if (type === "loading") questionStatus.classList.add("is-loading");
+  if (type === "error") questionStatus.classList.add("is-error");
 }
 
 function addChatMessage(role, content) {
   if (!chatMessages) return null;
-
-  // Remove welcome message if present
-  const welcome = chatMessages.querySelector(".chat-welcome");
-  if (welcome) welcome.remove();
-
-  const div = document.createElement("div");
-  div.className = `chat-msg is-${role}`;
-  div.textContent = content;
-  chatMessages.appendChild(div);
-  scrollChatToBottom();
-  return div;
+  chatMessages.querySelector(".chat-welcome")?.remove();
+  const message = document.createElement("div");
+  message.className = `chat-msg is-${role}`;
+  message.textContent = content;
+  chatMessages.appendChild(message);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+  return message;
 }
 
 function clearChat() {
-  if (!chatMessages) return;
-  chatMessages.innerHTML = "";
-}
-
-function scrollChatToBottom() {
-  if (chatMessages) {
-    chatMessages.scrollTop = chatMessages.scrollHeight;
-  }
-}
-
-function showStepIndicator(totalSteps) {
-  if (!stepIndicator) return;
-  stepIndicator.classList.remove("hidden");
-  updateStepIndicator(0);
-}
-
-function updateStepIndicator(step) {
-  const total = tutorState.totalSteps;
-  if (stepLabel) stepLabel.textContent = `Step ${step + 1} / ${total}`;
-  if (stepPrev) stepPrev.disabled = step <= 0;
-  if (stepNext) stepNext.disabled = step >= total - 1;
+  if (chatMessages) chatMessages.innerHTML = "";
 }
 
 function updateHintCount() {
@@ -544,214 +99,599 @@ function updateHintCount() {
   if (hintBtn) hintBtn.disabled = tutorState.hintsUsed >= tutorState.maxHints;
 }
 
-function updateSceneInfo(spec) {
-  if (!sceneInfo) return;
-  const objects = spec.objects || [];
-  const answer = spec.answer;
-  let html = `<p style="margin:0 0 6px"><strong>${spec.question || ""}</strong></p>`;
-  html += `<p class="muted-text">${objects.length} object${objects.length !== 1 ? "s" : ""} in scene</p>`;
-  if (answer?.formula) {
-    html += `<p class="muted-text">Formula: <span class="formula">${answer.formula}</span></p>`;
-  }
-  sceneInfo.innerHTML = html;
+function switchToTab(tabName) {
+  document.querySelectorAll(".panel-tab").forEach((button) => {
+    button.classList.toggle("active", button.dataset.tab === tabName);
+  });
+  document.querySelectorAll(".tab-content").forEach((content) => {
+    content.classList.toggle("active", content.dataset.content === tabName);
+  });
 }
 
-function updateObjectCount(count) {
-  if (objectCount) objectCount.textContent = count;
+function showAnswerSection(visible) {
+  answerSection?.classList.toggle("hidden", !visible);
 }
 
-function updateScore() {
-  if (scoreDisplay) scoreDisplay.textContent = `Score: ${tutorState.score}`;
-}
-
-function showAnswerFeedback(text, correct) {
+function showAnswerFeedback(text, correct = false) {
   if (!answerFeedback) return;
   answerFeedback.textContent = text;
   answerFeedback.className = `answer-feedback ${correct ? "is-correct" : "is-incorrect"}`;
   answerFeedback.classList.remove("hidden");
 }
 
-function animateCamera(position, target) {
-  if (!position || !target) return;
-  cameraDirector.animateTo(position, target, 1200);
+function renderSceneInfo() {
+  if (!sceneInfo) return;
+  const snapshot = currentSnapshot();
+  const plan = activePlan();
+  const count = snapshot.objects.length;
+  objectCount.textContent = String(count);
+
+  if (!plan) {
+    sceneInfo.innerHTML = `<p class="muted-text">Ask a question or choose a challenge to generate a guided build.</p>`;
+    return;
+  }
+
+  sceneInfo.innerHTML = `
+    <p style="margin:0 0 6px"><strong>${plan.problem.question}</strong></p>
+    <p class="muted-text">${count} object${count === 1 ? "" : "s"} currently in the world</p>
+    <p class="muted-text">Formula scaffold: <span class="formula">${plan.answerScaffold.formula || "Ask the tutor to derive it from the scene."}</span></p>
+  `;
+}
+
+function renderPlanSummary(plan) {
+  if (!planSummary || !planObjects || !scenePlanSection) return;
+  planSummary.textContent = plan.problem.summary || plan.problem.question;
+  if (buildSummary) {
+    buildSummary.classList.remove("hidden");
+    buildSummary.textContent = plan.overview || "Start with the suggested build, then use the tutor to reason through the measurements.";
+  }
+  planObjects.innerHTML = plan.objectSuggestions.map((suggestion) => `
+    <li>
+      <strong>${suggestion.title}</strong><br />
+      <span class="muted-text">${suggestion.purpose}</span>
+    </li>
+  `).join("");
+  scenePlanSection.classList.remove("hidden");
+}
+
+function renderPrompts(plan) {
+  if (!challengePromptList) return;
+  challengePromptList.innerHTML = plan.challengePrompts.map((prompt) => `
+    <div class="challenge-prompt-card">${prompt.prompt}</div>
+  `).join("") || `<div class="challenge-prompt-card">No challenge prompts yet. Build the scene first.</div>`;
+}
+
+function renderCameraBookmarks(plan) {
+  if (!cameraBookmarkList) return;
+  cameraBookmarkList.innerHTML = "";
+  (plan.cameraBookmarks || []).forEach((bookmark) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "camera-bookmark-btn";
+    button.textContent = bookmark.label;
+    button.addEventListener("click", () => {
+      cameraDirector.animateTo(bookmark.position, bookmark.target, 900);
+    });
+    cameraBookmarkList.appendChild(button);
+  });
+}
+
+function renderAnnotations() {
+  clearLabels(world.scene);
+  const snapshot = currentSnapshot();
+  snapshot.objects.forEach((objectSpec) => {
+    const [x, y, z] = objectSpec.position;
+    addLabel(world.scene, objectSpec.label || objectSpec.shape, [x, y + 0.9, z], "name");
+  });
+}
+
+function missingSuggestionIds(step, assessment) {
+  if (!step || !assessment) return [];
+  const byId = new Map(assessment.objectAssessments.map((item) => [item.suggestionId, item]));
+  return (step.requiredObjectIds || []).filter((id) => !byId.get(id)?.present);
+}
+
+function addSuggestionsById(suggestionIds) {
+  const plan = activePlan();
+  if (!plan) return;
+  const snapshot = currentSnapshot();
+  const existingShapes = new Set(snapshot.objects.map((objectSpec) => `${objectSpec.shape}:${JSON.stringify(objectSpec.params)}`));
+  const toAdd = plan.objectSuggestions
+    .filter((suggestion) => suggestionIds.includes(suggestion.id))
+    .filter((suggestion) => !existingShapes.has(`${suggestion.object.shape}:${JSON.stringify(suggestion.object.params)}`))
+    .map((suggestion) => suggestion.object);
+  if (!toAdd.length) return;
+  sceneApi.addObjects(toAdd, { reason: "guided-add" });
+  renderAnnotations();
+}
+
+function renderSteps(plan, assessment) {
+  if (!buildStepsList || !buildStepsSection) return;
+  buildStepsSection.classList.remove("hidden");
+  const currentStep = tutorState.getCurrentStep();
+  buildGoalChip.textContent = currentStep ? currentStep.title : "Ready";
+
+  buildStepsList.innerHTML = plan.buildSteps.map((step, index) => {
+    const stepAssessment = assessment?.stepAssessments?.find((item) => item.stepId === step.id);
+    const active = tutorState.currentStep === index;
+    const complete = Boolean(stepAssessment?.complete);
+    const missing = missingSuggestionIds(step, assessment);
+    const buttonLabel = missing.length ? `Add ${missing.length} suggestion${missing.length === 1 ? "" : "s"}` : "Review step";
+    return `
+      <article class="build-step-card${active ? " is-active" : ""}${complete ? " is-complete" : ""}" data-step-id="${step.id}">
+        <div class="build-step-top">
+          <p class="build-step-title">${step.title}</p>
+          <span class="build-step-state">${complete ? "complete" : active ? "active" : "open"}</span>
+        </div>
+        <p class="build-step-instruction">${step.instruction}</p>
+        <p class="build-step-hint">${step.hint || "Use the tutor if you need a short hint."}</p>
+        <p class="build-step-feedback ${complete ? "is-good" : "is-warn"}">${stepAssessment?.feedback || "Build this part of the scene to continue."}</p>
+        <div class="build-step-actions">
+          <button type="button" class="step-card-btn" data-step-action="focus" data-step-id="${step.id}">${buttonLabel}</button>
+        </div>
+      </article>
+    `;
+  }).join("");
+}
+
+function renderAssessment(assessment) {
+  if (!sceneValidation) return;
+  if (!assessment) {
+    sceneValidation.innerHTML = `<p class="muted-text">The tutor will evaluate your scene as you build.</p>`;
+    showAnswerSection(false);
+    return;
+  }
+
+  sceneValidation.innerHTML = `
+    <div class="validation-stat"><strong>${assessment.summary.matchedRequiredObjects}/${assessment.summary.totalRequiredObjects}</strong> required objects matched</div>
+    <div class="validation-stat"><strong>${Math.round(assessment.summary.completionRatio * 100)}%</strong> build completion</div>
+    <div class="validation-stat"><strong>${assessment.answerGate.allowed ? "Ready" : "Not ready"}</strong> to answer<br />${assessment.answerGate.reason}</div>
+  `;
+
+  showAnswerSection(Boolean(activeChallenge && assessment.answerGate.allowed));
+}
+
+function showStepIndicator() {
+  if (!stepIndicator) return;
+  const total = tutorState.totalSteps;
+  if (!total) {
+    stepIndicator.classList.add("hidden");
+    return;
+  }
+  stepIndicator.classList.remove("hidden");
+  stepLabel.textContent = `Build ${tutorState.currentStep + 1} / ${total}`;
+  stepPrev.disabled = tutorState.currentStep <= 0;
+  stepNext.disabled = tutorState.currentStep >= total - 1;
+}
+
+async function syncAssessment() {
+  const plan = activePlan();
+  if (!plan) {
+    renderAssessment(null);
+    return;
+  }
+  try {
+    const { assessment } = await evaluateBuild({
+      plan,
+      sceneSnapshot: currentSnapshot(),
+      currentStepId: tutorState.getCurrentStep()?.id || null,
+    });
+    tutorState.setAssessment(assessment);
+    renderSteps(plan, assessment);
+    renderAssessment(assessment);
+    renderSceneInfo();
+    showStepIndicator();
+  } catch (error) {
+    console.error("Assessment sync failed:", error);
+  }
+}
+
+function scheduleAssessment() {
+  window.clearTimeout(assessmentTimer);
+  assessmentTimer = window.setTimeout(() => {
+    syncAssessment();
+    renderAnnotations();
+  }, 180);
+}
+
+function setPlan(plan, options = {}) {
+  const normalizedPlan = normalizeScenePlan(plan);
+  activeChallenge = options.challenge || null;
+  tutorState.setPlan(normalizedPlan, { mode: options.mode || normalizedPlan.problem.mode || "guided" });
+  tutorState.setPhase("plan_ready");
+  if (answerFeedback) {
+    answerFeedback.textContent = "";
+    answerFeedback.classList.add("hidden");
+  }
+  if (answerInput) answerInput.value = "";
+  renderPlanSummary(normalizedPlan);
+  renderPrompts(normalizedPlan);
+  renderCameraBookmarks(normalizedPlan);
+  renderSceneInfo();
+  renderSteps(normalizedPlan, tutorState.latestAssessment);
+  showStepIndicator();
+  if (options.clearScene !== false) {
+    sceneApi.clearScene();
+  }
+}
+
+async function handleQuestionSubmit() {
+  const question = questionInput?.value?.trim();
+  if (!question) return;
+
+  tutorState.reset();
+  activeChallenge = null;
+  tutorState.setPhase("parsing");
+  questionSubmit.disabled = true;
+  setQuestionStatus("Asking Nova Pro for a scene plan...", "loading");
+
+  try {
+    const { scenePlan } = await requestScenePlan({ question, mode: "guided", sceneSnapshot: currentSnapshot() });
+    setPlan(scenePlan);
+    clearChat();
+    addChatMessage("system", `Question loaded: "${question}"`);
+    addChatMessage("tutor", "I turned your question into a build plan. Pick how you want to construct the scene, and I will guide the reasoning.");
+    setQuestionStatus("", "hidden");
+  } catch (error) {
+    console.error("Plan request failed:", error);
+    tutorState.setError(error.message);
+    setQuestionStatus(`Error: ${error.message}`, "error");
+  } finally {
+    questionSubmit.disabled = false;
+  }
+}
+
+function beginGuidedBuild() {
+  const plan = activePlan();
+  if (!plan) return;
+  tutorState.setMode("guided");
+  tutorState.setPhase(activeChallenge ? "challenge" : "guided_build");
+  sceneApi.clearScene();
+  switchToTab("tutor");
+  addChatMessage("tutor", "Guided build is ready. Use the step cards to add the scene one layer at a time.");
+  scheduleAssessment();
+}
+
+function addAllSuggestedObjects() {
+  const plan = activePlan();
+  if (!plan) return;
+  tutorState.setMode("guided");
+  tutorState.setPhase("explore");
+  sceneApi.loadSnapshot(buildSceneSnapshotFromSuggestions(plan), "add-all");
+  renderAnnotations();
+  addChatMessage("tutor", "The full suggested scene is in the world now. Edit it freely, and ask me to explain how the measurements connect to the formula.");
+  scheduleAssessment();
+}
+
+function beginManualBuild() {
+  const plan = activePlan();
+  if (!plan) return;
+  tutorState.setMode("manual");
+  tutorState.setPhase(activeChallenge ? "challenge" : "manual_build");
+  sceneApi.clearScene();
+  switchToTab("scene");
+  addChatMessage("tutor", "Manual build mode is active. Create the geometry yourself, and I will verify what is missing or correct.");
+  scheduleAssessment();
+}
+
+async function sendTutorMessage(messageText) {
+  const plan = activePlan();
+  if (!plan) return;
+  const text = messageText?.trim();
+  if (!text) return;
+  addChatMessage("user", text);
+  tutorState.addMessage("user", text);
+
+  const typing = addChatMessage("tutor", "...");
+  typing.classList.add("loading-dots");
+
+  try {
+    const response = await askTutor({
+      plan,
+      sceneSnapshot: currentSnapshot(),
+      learningState: tutorState.snapshot(),
+      userMessage: text,
+      contextStepId: tutorState.getCurrentStep()?.id || null,
+      onChunk: (chunk) => {
+        typing.classList.remove("loading-dots");
+        typing.textContent = (typing.textContent === "..." ? "" : typing.textContent) + chunk;
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+      },
+      onAssessment: (assessment) => {
+        tutorState.setAssessment(assessment);
+        renderAssessment(assessment);
+        renderSteps(plan, assessment);
+      },
+    });
+
+    typing.classList.remove("loading-dots");
+    typing.textContent = response.text || "I could not generate a tutor reply.";
+    tutorState.addMessage("assistant", typing.textContent);
+
+    if (response.assessment) {
+      tutorState.setAssessment(response.assessment);
+    }
+
+    if (voiceEnabled && typing.textContent) {
+      speakText(typing.textContent);
+    }
+  } catch (error) {
+    typing.classList.remove("loading-dots");
+    typing.textContent = `Error: ${error.message}`;
+  }
+}
+
+async function handleHint() {
+  if (!tutorState.useHint()) {
+    addChatMessage("system", "No more hints available.");
+    return;
+  }
+  updateHintCount();
+  await sendTutorMessage("Give me one short hint about the next spatial step.");
+}
+
+async function handleExplain() {
+  const step = tutorState.getCurrentStep();
+  if (!step) {
+    await sendTutorMessage("Explain how to reason about this scene.");
+    return;
+  }
+  await sendTutorMessage(`Explain this build step: ${step.title}.`);
 }
 
 async function speakText(text) {
   if (!text) return;
   try {
-    const res = await fetch("/api/voice", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    });
-    if (!res.ok) throw new Error("voice endpoint error");
-    const data = await res.json();
-
-    if (data.method === "polly" && data.audio) {
-      // Play Polly-synthesized MP3 audio
-      const binary = atob(data.audio);
+    const response = await requestVoiceResponse(text, "auto");
+    if (voiceTranscript) {
+      voiceTranscript.textContent = response.transcript || text;
+    }
+    if (response.audioBase64) {
+      const binary = atob(response.audioBase64);
       const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      const blob = new Blob([bytes], { type: data.contentType || "audio/mpeg" });
+      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+      const blob = new Blob([bytes], { type: response.contentType || "audio/mpeg" });
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       audio.onended = () => URL.revokeObjectURL(url);
       await audio.play();
       return;
     }
-    // Fallback: browser TTS
-    if ("speechSynthesis" in window) {
-      const utterance = new SpeechSynthesisUtterance(data.text || text);
-      utterance.rate = 1.0;
-      speechSynthesis.speak(utterance);
+  } catch (error) {
+    console.warn("Voice response failed:", error);
+  }
+
+  if ("speechSynthesis" in window) {
+    const utterance = new SpeechSynthesisUtterance(text);
+    speechSynthesis.speak(utterance);
+  }
+}
+
+function bindStepList() {
+  buildStepsList?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-step-action]");
+    const card = event.target.closest("[data-step-id]");
+    const stepId = button?.dataset.stepId || card?.dataset.stepId;
+    if (!stepId) return;
+
+    const plan = activePlan();
+    const stepIndex = plan?.buildSteps?.findIndex((step) => step.id === stepId) ?? -1;
+    if (stepIndex >= 0) {
+      tutorState.goToStep(stepIndex);
+      showStepIndicator();
+      renderSteps(plan, tutorState.latestAssessment);
     }
-  } catch {
-    // Final fallback: browser TTS
-    if ("speechSynthesis" in window) {
-      speechSynthesis.speak(new SpeechSynthesisUtterance(text));
-    }
-  }
-}
 
-// ============ DEMO MODE ============
-
-const DEMO_SPEC = {
-  question: "A sphere of radius 3 sits on top of a cube with side length 5. What is the total surface area?",
-  questionType: "composite",
-  objects: [
-    {
-      id: "A", shape: "cube",
-      params: { size: 5 },
-      position: [0, 2.5, 0], rotation: [0, 0, 0],
-      color: "#48c9ff", highlight: false,
-    },
-    {
-      id: "B", shape: "sphere",
-      params: { radius: 3 },
-      position: [0, 8, 0], rotation: [0, 0, 0],
-      color: "#7cf7e4", highlight: false,
-    },
-  ],
-  labels: [
-    { text: "Cube (a = 5)", attachTo: "A", offset: [0, -1, 3.5], style: "name" },
-    { text: "Sphere (r = 3)", attachTo: "B", offset: [0, 2, 2], style: "name" },
-  ],
-  dimensions: [
-    { from: [-2.5, 0, 2.6], to: [2.5, 0, 2.6], label: "5 units", color: "#48c9ff" },
-    { from: [2.6, 0, 0], to: [2.6, 5, 0], label: "5 units", color: "#48c9ff" },
-    { from: [0, 8, 0], to: [3, 8, 0], label: "r = 3", color: "#7cf7e4" },
-  ],
-  camera: { position: [14, 10, 14], target: [0, 4, 0] },
-  answer: {
-    value: "150 + 4\u03c0(9) \u2248 263.1",
-    unit: "square units",
-    formula: "SA = 5a\u00b2 + 4\u03c0r\u00b2",
-    steps: [
-      { text: "Find the cube's exposed surface area. The top face is partially covered, but we assume the sphere sits on it. 5 faces are fully exposed plus the top face area minus the contact circle.", formula: "SA_cube \u2248 5 \u00d7 5\u00b2 = 125", highlightObjects: ["A"] },
-      { text: "Find the sphere's full surface area.", formula: "SA_sphere = 4\u03c0r\u00b2 = 4\u03c0(3)\u00b2 = 36\u03c0 \u2248 113.1", highlightObjects: ["B"] },
-      { text: "Add them together for the total surface area (assuming tangent contact).", formula: "SA_total = 125 + 36\u03c0 \u2248 238.1", highlightObjects: ["A", "B"] },
-    ],
-  },
-};
-
-async function runDemoMode() {
-  showToast("Demo mode: Loading showcase scene...", "info");
-
-  // Load the demo scene directly without API call
-  clearCurrentScene();
-  const result = buildSceneFromSpec(DEMO_SPEC, world);
-  currentMeshes = result.meshes;
-  currentSpec = result.spec;
-  tutorState.setSceneSpec(result.spec);
-
-  addLabelsFromSpec(world.scene, result.spec, currentMeshes);
-  animateCamera(result.spec.camera.position, result.spec.camera.target);
-  updateSceneInfo(result.spec);
-  updateObjectCount(currentMeshes.size);
-
-  if (questionInput) questionInput.value = DEMO_SPEC.question;
-
-  clearChat();
-  addChatMessage("system", "Demo Mode: Showcase scene loaded");
-  addChatMessage("tutor", `I've created a 3D scene showing a sphere (radius 3) on top of a cube (side 5). There are ${result.spec.answer.steps.length} steps to find the total surface area. Use the step navigator above the viewport, or click "Explain Step" to walk through the solution.`);
-
-  if (result.spec.answer?.steps?.length > 0) {
-    showStepIndicator(result.spec.answer.steps.length);
-    tutorState.setPhase("walkthrough");
-  }
-
-  // Auto-walkthrough: advance through steps with delays
-  await delay(3000);
-  for (let i = 0; i < result.spec.answer.steps.length; i++) {
-    tutorState.goToStep(i);
-    pulseHighlightedObjects(result.spec.answer.steps[i].highlightObjects);
-    await delay(4000);
-  }
-  showToast("Demo complete! Try asking your own question.", "success");
-}
-
-function delay(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-// ============ TOAST NOTIFICATIONS ============
-
-let toastContainer = null;
-
-function initToastContainer() {
-  toastContainer = document.createElement("div");
-  toastContainer.className = "toast-container";
-  document.body.appendChild(toastContainer);
-}
-
-function showToast(message, type = "info", durationMs = 4000) {
-  if (!toastContainer) initToastContainer();
-
-  const toast = document.createElement("div");
-  toast.className = `toast toast--${type}`;
-  toast.textContent = message;
-  toastContainer.appendChild(toast);
-
-  // Trigger enter animation
-  requestAnimationFrame(() => toast.classList.add("toast--visible"));
-
-  setTimeout(() => {
-    toast.classList.remove("toast--visible");
-    toast.addEventListener("transitionend", () => toast.remove(), { once: true });
-    // Fallback removal
-    setTimeout(() => toast.remove(), 500);
-  }, durationMs);
-}
-
-// ============ HIGHLIGHT PULSE ============
-
-function pulseHighlightedObjects(objectIds) {
-  if (!currentMeshes || !objectIds) return;
-  for (const id of objectIds) {
-    const mesh = currentMeshes.get(id);
-    if (!mesh) continue;
-    const startIntensity = mesh.material.emissiveIntensity;
-    const startTime = performance.now();
-    const duration = 800;
-
-    function pulseTick(now) {
-      const t = (now - startTime) / duration;
-      if (t >= 1) {
-        mesh.material.emissiveIntensity = 0.7;
-        return;
+    if (button?.dataset.stepAction === "focus") {
+      const step = plan?.buildSteps?.[stepIndex];
+      if (!step) return;
+      const assessment = tutorState.latestAssessment;
+      const idsToAdd = missingSuggestionIds(step, assessment);
+      if (idsToAdd.length) {
+        addSuggestionsById(idsToAdd);
+        addChatMessage("system", `Added suggestions for ${step.title}.`);
+      } else if (step.cameraBookmarkId) {
+        const bookmark = plan.cameraBookmarks.find((candidate) => candidate.id === step.cameraBookmarkId);
+        if (bookmark) {
+          cameraDirector.animateTo(bookmark.position, bookmark.target, 900);
+        }
       }
-      // Smooth pulse: ramp up then back
-      const pulse = Math.sin(t * Math.PI);
-      mesh.material.emissiveIntensity = startIntensity + pulse * 0.8;
-      requestAnimationFrame(pulseTick);
+      scheduleAssessment();
     }
-    requestAnimationFrame(pulseTick);
+  });
+}
+
+async function loadChallengesList() {
+  try {
+    const { challenges } = await fetchChallenges();
+    challengeList.innerHTML = challenges.map((challenge) => `
+      <div class="challenge-item" data-id="${challenge.id}">
+        <p class="challenge-title">${challenge.title}</p>
+        <div class="challenge-meta">
+          <span class="challenge-diff ${challenge.difficulty}">${challenge.difficulty}</span>
+          <span>${challenge.category}</span>
+        </div>
+      </div>
+    `).join("");
+
+    challengeList.querySelectorAll(".challenge-item").forEach((node) => {
+      node.addEventListener("click", () => {
+        const challenge = challenges.find((candidate) => candidate.id === node.dataset.id);
+        if (!challenge) return;
+        activeChallenge = challenge;
+        questionInput.value = challenge.question;
+        tutorState.startChallenge(challenge.id, challenge.scenePlan);
+        setPlan(challenge.scenePlan, { challenge, clearScene: true });
+        addChatMessage("system", `Challenge: ${challenge.title}`);
+        addChatMessage("tutor", "Build the scene correctly first. The answer box unlocks after the required objects and measurements are in place.");
+        beginManualBuild();
+      });
+    });
+  } catch (error) {
+    challengeList.innerHTML = `<p class="muted-text">Challenges need the server to be running.</p>`;
+    console.error("Challenge load failed:", error);
   }
 }
 
-/**
- * Call this in the render loop to update labels.
- */
+async function handleAnswerSubmit() {
+  if (!activeChallenge) return;
+  const answer = Number(answerInput?.value);
+  if (!Number.isFinite(answer)) {
+    showAnswerFeedback("Enter a valid number first.", false);
+    return;
+  }
+  if (!tutorState.latestAssessment?.answerGate?.allowed) {
+    showAnswerFeedback("Finish the build check before answering.", false);
+    return;
+  }
+
+  try {
+    const result = await checkChallenge(activeChallenge.id, answer);
+    showAnswerFeedback(result.feedback, result.correct);
+    if (result.correct) {
+      tutorState.recordCorrect();
+      scoreDisplay.textContent = `Score: ${tutorState.score}`;
+      tutorState.setPhase("complete");
+    } else {
+      tutorState.recordIncorrect();
+    }
+  } catch (error) {
+    showAnswerFeedback(`Error: ${error.message}`, false);
+  }
+}
+
+function bindEvents() {
+  document.querySelectorAll(".panel-tab").forEach((button) => {
+    button.addEventListener("click", () => switchToTab(button.dataset.tab));
+  });
+
+  questionSubmit?.addEventListener("click", handleQuestionSubmit);
+  questionInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      handleQuestionSubmit();
+    }
+  });
+
+  chatSend?.addEventListener("click", () => {
+    const text = chatInput?.value?.trim();
+    if (!text) return;
+    chatInput.value = "";
+    sendTutorMessage(text);
+  });
+  chatInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      chatSend.click();
+    }
+  });
+
+  addAllBtn?.addEventListener("click", addAllSuggestedObjects);
+  stepByStepBtn?.addEventListener("click", beginGuidedBuild);
+  buildManuallyBtn?.addEventListener("click", beginManualBuild);
+  hintBtn?.addEventListener("click", handleHint);
+  explainBtn?.addEventListener("click", handleExplain);
+  voiceToggle?.addEventListener("click", () => {
+    voiceEnabled = !voiceEnabled;
+    voiceToggle.classList.toggle("is-active", voiceEnabled);
+    voiceTranscript.textContent = voiceEnabled ? "Voice is enabled. Tutor responses will appear here." : "Voice is off.";
+  });
+
+  document.getElementById("demoBtn")?.addEventListener("click", () => {
+    questionInput.value = "A cylinder has radius 3 and height 10. What is its volume?";
+    handleQuestionSubmit().then(() => beginGuidedBuild());
+  });
+
+  answerSubmit?.addEventListener("click", handleAnswerSubmit);
+  answerInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      handleAnswerSubmit();
+    }
+  });
+
+  stepPrev?.addEventListener("click", () => {
+    tutorState.prevStep();
+    showStepIndicator();
+    renderSteps(activePlan(), tutorState.latestAssessment);
+  });
+  stepNext?.addEventListener("click", () => {
+    tutorState.nextStep();
+    showStepIndicator();
+    renderSteps(activePlan(), tutorState.latestAssessment);
+  });
+
+  bindStepList();
+}
+
+function bindDom() {
+  questionInput = document.getElementById("questionInput");
+  questionSubmit = document.getElementById("questionSubmit");
+  questionStatus = document.getElementById("questionStatus");
+  scenePlanSection = document.getElementById("scenePlanSection");
+  planSummary = document.getElementById("planSummary");
+  buildSummary = document.getElementById("buildSummary");
+  planObjects = document.getElementById("planObjects");
+  addAllBtn = document.getElementById("addAllBtn");
+  stepByStepBtn = document.getElementById("stepByStepBtn");
+  buildManuallyBtn = document.getElementById("buildManuallyBtn");
+  buildStepsSection = document.getElementById("buildStepsSection");
+  buildStepsList = document.getElementById("buildStepsList");
+  buildGoalChip = document.getElementById("buildGoalChip");
+  challengePromptList = document.getElementById("challengePromptList");
+  voiceTranscript = document.getElementById("voiceTranscript");
+  challengeList = document.getElementById("challengeList");
+  scoreDisplay = document.getElementById("scoreDisplay");
+  chatMessages = document.getElementById("chatMessages");
+  chatInput = document.getElementById("chatInput");
+  chatSend = document.getElementById("chatSend");
+  hintBtn = document.getElementById("hintBtn");
+  hintCount = document.getElementById("hintCount");
+  explainBtn = document.getElementById("explainBtn");
+  voiceToggle = document.getElementById("voiceToggle");
+  answerSection = document.getElementById("answerSection");
+  answerInput = document.getElementById("answerInput");
+  answerSubmit = document.getElementById("answerSubmit");
+  answerFeedback = document.getElementById("answerFeedback");
+  sceneInfo = document.getElementById("sceneInfo");
+  sceneValidation = document.getElementById("sceneValidation");
+  cameraBookmarkList = document.getElementById("cameraBookmarkList");
+  objectCount = document.getElementById("objectCount");
+  stepIndicator = document.getElementById("stepIndicator");
+  stepLabel = document.getElementById("stepLabel");
+  stepPrev = document.getElementById("stepPrev");
+  stepNext = document.getElementById("stepNext");
+}
+
+export function initTutorController(context) {
+  appContext = context;
+  world = context.world;
+  sceneApi = context.sceneApi;
+  cameraDirector = new CameraDirector(world.camera, world.controls);
+
+  const stageWrap = document.querySelector(".stage-wrap");
+  if (stageWrap) {
+    initLabelRenderer(stageWrap);
+  }
+
+  bindDom();
+  bindEvents();
+  updateHintCount();
+  renderAssessment(null);
+  renderSceneInfo();
+  loadChallengesList();
+
+  sceneApi.onSceneChange(() => {
+    renderSceneInfo();
+    scheduleAssessment();
+  });
+
+  if (new URLSearchParams(window.location.search).has("demo")) {
+    questionInput.value = "A cylinder has radius 3 and height 10. What is its volume?";
+    handleQuestionSubmit().then(() => beginGuidedBuild());
+  }
+}
+
 export function updateTutorLabels() {
   if (world) {
     renderLabels(world.scene, world.camera);

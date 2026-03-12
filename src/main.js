@@ -1,10 +1,10 @@
 import { bootstrapApp } from "./app.js";
 import { initTutorController, updateTutorLabels } from "./ui/tutorController.js";
 
-const { world } = bootstrapApp();
+const appContext = bootstrapApp();
 
 // Initialize tutor system
-initTutorController(world);
+initTutorController(appContext);
 
 // Add label rendering to the animation loop
 function tutorRenderLoop() {

@@ -278,12 +278,13 @@ export function createWorld(container) {
     let geometry;
     switch (type) {
       case "line": geometry = new THREE.CylinderGeometry(lineRadius(size), lineRadius(size), Math.max(0.02, size), 18); break;
-      case "cuboid": geometry = new THREE.BoxGeometry(size * 1.6, size, size * 0.9); break;
-      case "sphere": geometry = new THREE.SphereGeometry(size * 0.6, 28, 20); break;
-      case "cylinder": geometry = new THREE.CylinderGeometry(size * 0.45, size * 0.45, size * 1.4, 24); break;
-      case "cone": geometry = new THREE.ConeGeometry(size * 0.5, size * 1.2, 32); break;
-      case "pyramid": geometry = new THREE.ConeGeometry(size * 0.71, size, 4); break; // square pyramid
+      case "cuboid": geometry = new THREE.BoxGeometry(size, size, size); break;
+      case "sphere": geometry = new THREE.SphereGeometry(size * 0.5, 28, 20); break;
+      case "cylinder": geometry = new THREE.CylinderGeometry(size * 0.4, size * 0.4, size, 24); break;
+      case "cone": geometry = new THREE.ConeGeometry(size * 0.5, size, 32); break;
+      case "pyramid": geometry = new THREE.ConeGeometry(size / Math.sqrt(2), size, 4); break; // square pyramid
       case "plane": geometry = new THREE.PlaneGeometry(size * 2, size * 2); break;
+      case "pointMarker": geometry = new THREE.SphereGeometry(Math.max(0.08, size * 0.08), 16, 12); break;
       default: geometry = new THREE.BoxGeometry(size, size, size);
     }
 
@@ -291,7 +292,11 @@ export function createWorld(container) {
     const mesh = new THREE.Mesh(geometry, material);
     const bbox = new THREE.Box3().setFromObject(mesh);
     const halfHeight = (bbox.max.y - bbox.min.y) / 2;
-    mesh.position.y = halfHeight;
+    mesh.position.y = type === "plane" ? 0 : halfHeight;
+    if (type === "plane") {
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.material.opacity = 0.72;
+    }
     return mesh;
   }
 

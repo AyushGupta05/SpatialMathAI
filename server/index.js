@@ -12,10 +12,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: resolve(__dirname, "..", ".env.local") });
 
 // Import routes
-import parseRoute from "./routes/parse.js";
+import planRoute from "./routes/plan.js";
 import tutorRoute from "./routes/tutor.js";
 import voiceRoute from "./routes/voice.js";
 import challengesRoute from "./routes/challenges.js";
+import buildRoute from "./routes/build.js";
 
 const app = new Hono();
 
@@ -24,10 +25,11 @@ app.use("*", logger());
 app.use("*", cors());
 
 // API routes
-app.route("/api/parse", parseRoute);
+app.route("/api/plan", planRoute);
 app.route("/api/tutor", tutorRoute);
 app.route("/api/voice", voiceRoute);
 app.route("/api/challenges", challengesRoute);
+app.route("/api/build", buildRoute);
 
 // Health check
 app.get("/api/health", (c) => c.json({ status: "ok", timestamp: Date.now() }));

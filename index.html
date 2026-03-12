@@ -107,10 +107,10 @@
               <label class="field">
                 <span>Default Size</span>
                 <select id="sizeInput">
-                  <option value="0.5">S</option>
-                  <option value="0.9" selected>M</option>
-                  <option value="1.3">L</option>
-                  <option value="1.8">XL</option>
+                  <option value="0.75">S</option>
+                  <option value="1" selected>M</option>
+                  <option value="1.5">L</option>
+                  <option value="2">XL</option>
                 </select>
               </label>
               <label class="field">
@@ -188,13 +188,30 @@
               </div>
               <div class="scene-plan">
                 <div id="planSummary" class="plan-summary"></div>
+                <div id="buildSummary" class="build-summary hidden"></div>
                 <ul id="planObjects" class="plan-objects"></ul>
                 <div class="plan-actions">
                   <button id="addAllBtn" class="plan-btn btn-primary">Add All</button>
-                  <button id="stepByStepBtn" class="plan-btn btn-secondary">Step by Step</button>
+                  <button id="stepByStepBtn" class="plan-btn btn-secondary">Start Guided Build</button>
                   <button id="buildManuallyBtn" class="plan-btn btn-ghost">Build Manually</button>
                 </div>
               </div>
+            </section>
+
+            <section id="buildStepsSection" class="build-steps-section hidden">
+              <div class="card-heading">
+                <h2>Guided Build</h2>
+                <span id="buildGoalChip" class="pill subtle">Waiting</span>
+              </div>
+              <div id="buildStepsList" class="build-steps-list"></div>
+              <div class="card-heading compact-heading">
+                <h2>Challenge Prompts</h2>
+              </div>
+              <div id="challengePromptList" class="challenge-prompt-list"></div>
+              <div class="card-heading compact-heading">
+                <h2>Voice Transcript</h2>
+              </div>
+              <div id="voiceTranscript" class="voice-transcript muted-text">Voice is off.</div>
             </section>
 
             <!-- Challenges -->
@@ -213,7 +230,7 @@
               <div id="chatMessages" class="chat-messages">
                 <div class="chat-welcome">
                   <p class="chat-welcome-title">Welcome to SpatialMath Nova</p>
-                  <p class="chat-welcome-text">Ask a geometry question to get started. I'll create a 3D scene and guide you through the solution step by step.</p>
+                  <p class="chat-welcome-text">Ask a geometry question to get a suggested scene plan, then build the geometry step by step with the tutor.</p>
                 </div>
               </div>
 
@@ -271,6 +288,16 @@
               <div id="sceneInfo" class="scene-info">
                 <p class="muted-text">Ask a question or pick a challenge to generate a 3D scene.</p>
               </div>
+            </section>
+
+            <section class="scene-validation-section">
+              <div class="card-heading">
+                <h2>Build Check</h2>
+              </div>
+              <div id="sceneValidation" class="scene-validation">
+                <p class="muted-text">The tutor will evaluate your scene as you build.</p>
+              </div>
+              <div id="cameraBookmarkList" class="camera-bookmark-list"></div>
             </section>
 
             <!-- Shape Controls -->

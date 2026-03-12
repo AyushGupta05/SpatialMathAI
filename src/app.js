@@ -4,6 +4,7 @@ import { deriveScaleK, loadCalibration, saveCalibration } from "./calibration/st
 import { InteractionPipeline } from "./signals/interactionPipeline.js";
 import { appState } from "./state/store.js";
 import { createWorld } from "./render/world.js";
+import { createSceneRuntime } from "./scene/sceneRuntime.js";
 import { FilesetResolver, HandLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest";
 import * as THREE from "three";
 import {
@@ -106,9 +107,9 @@ export function bootstrapApp() {
   let dragSession = null;
   let secondaryClickIntent = null;
   let mousePlaceContext = null;
-  let nextObjectSerial = 0;
   let placementPreview = null;
-  const placedMeshes = [];
+  const sceneRuntime = createSceneRuntime({ world });
+  const placedMeshes = sceneRuntime.meshes;
   const MAX_MESHES = 220;
   const calibrationPresets = {
     custom: null,
@@ -144,6 +145,7 @@ export function bootstrapApp() {
       activeMesh.material.emissive.setHex(0x2ccbd3);
     }
     if (!activeMesh) {
+      sceneRuntime.setSelection(null);
       selectionRing.visible = false;
       selectionRing.scale.setScalar(1);
       selectionRing.material.opacity = 0.95;
@@ -151,6 +153,7 @@ export function bootstrapApp() {
       renderObjectList();
       return;
     }
+    sceneRuntime.setSelection(activeMesh);
     if (shapeTypeEl && activeMesh.userData?.shape) shapeTypeEl.value = activeMesh.userData.shape;
     if (colorInputEl && activeMesh.material?.color) colorInputEl.value = `#${activeMesh.material.color.getHexString()}`;
     selectionRing.userData.pulseStartAt = performance.now();
@@ -842,7 +845,7 @@ export function bootstrapApp() {
     }
     ensureMeshIdentity(mesh);
     updateMeshMetadata(mesh);
-    placedMeshes.push(mesh);
+    sceneRuntime.registerMesh(mesh, { metadata: { source: "manual" } }, "place");
     enforceMeshBudget();
     updateGeometryMetrics(mesh.userData.shape, mesh.userData.baseSize, mesh);
     setActiveMesh(null);
@@ -977,10 +980,12 @@ export function bootstrapApp() {
   }
 
   function endTransformSession(statusMsg = "Transform released") {
-    if (!transformSession && !activeMesh) return;
+    const focusMesh = rotationSession?.mesh || transformSession?.mesh || activeMesh;
+    if (!focusMesh) return;
     transformSession = null;
     rotationSession = null;
     wristRotSession = null;
+    sceneRuntime.notifySceneChanged("transform-end", focusMesh);
     setActiveMesh(null);
     setStatus(statusMsg, "idle");
   }
@@ -1631,27 +1636,9 @@ export function bootstrapApp() {
     statusEl.dataset.state = state;
   }
 
-  function objectLabelForIndex(index) {
-    let value = Math.max(0, index);
-    let label = "";
-    do {
-      label = String.fromCharCode(65 + (value % 26)) + label;
-      value = Math.floor(value / 26) - 1;
-    } while (value >= 0);
-    return label;
-  }
-
   function ensureMeshIdentity(mesh) {
     if (!mesh) return null;
-    if (!mesh.userData.objectSerial) {
-      nextObjectSerial += 1;
-      mesh.userData.objectSerial = nextObjectSerial;
-    } else {
-      nextObjectSerial = Math.max(nextObjectSerial, Number(mesh.userData.objectSerial) || 0);
-    }
-    if (!mesh.userData.label) {
-      mesh.userData.label = objectLabelForIndex((Number(mesh.userData.objectSerial) || 1) - 1);
-    }
+    sceneRuntime.ensureMeshIdentity(mesh);
     if (!mesh.userData.shape) mesh.userData.shape = "cube";
     return mesh.userData.objectSerial;
   }
@@ -1714,6 +1701,7 @@ export function bootstrapApp() {
       Number(mesh.userData.baseSize || sizeInputEl.value) * nextScale,
       mesh
     );
+    sceneRuntime.notifySceneChanged("scale", mesh);
     refreshDebug();
     return nextScale;
   }
@@ -1742,6 +1730,7 @@ export function bootstrapApp() {
       mesh.position[axis] = nextValue;
     }
     updateMeshMetadata(mesh);
+    sceneRuntime.notifySceneChanged("position", mesh);
     refreshDebug();
     return nextValue;
   }
@@ -1760,6 +1749,7 @@ export function bootstrapApp() {
       Number(mesh.userData.baseSize || sizeInputEl.value) * meshScaleValue(mesh),
       mesh
     );
+    sceneRuntime.notifySceneChanged("scale-axis", mesh);
     refreshDebug();
     return nextScale;
   }
@@ -1769,6 +1759,7 @@ export function bootstrapApp() {
     if (!mesh) return null;
     const degrees = normalizeRotationDegrees(rawValue);
     mesh.rotation.y = THREE.MathUtils.degToRad(degrees);
+    sceneRuntime.notifySceneChanged("rotation", mesh);
     refreshDebug();
     return degrees;
   }
@@ -1778,6 +1769,7 @@ export function bootstrapApp() {
     if (!mesh?.rotation) return null;
     const degrees = normalizeRotationDegrees(rawValue);
     mesh.rotation[axis] = THREE.MathUtils.degToRad(degrees);
+    sceneRuntime.notifySceneChanged("rotation-axis", mesh);
     refreshDebug();
     return degrees;
   }
@@ -1842,6 +1834,7 @@ export function bootstrapApp() {
     if (mesh === activeMesh && mesh.material?.emissive) {
       mesh.material.emissive.setHex(0x2ccbd3);
     }
+    sceneRuntime.notifySceneChanged("appearance", mesh);
     return true;
   }
 
@@ -1860,8 +1853,8 @@ export function bootstrapApp() {
     const currentColor = colorHex(mesh);
     const text = String(rawValue || "").trim();
     const shapeMatch =
-      text.match(/shape\s*[:=]\s*(cube|cuboid|sphere|cylinder|line)/i) ||
-      text.match(/\b(cube|cuboid|sphere|cylinder|line)\b/i);
+      text.match(/shape\s*[:=]\s*(cube|cuboid|sphere|cylinder|cone|pyramid|plane|line)/i) ||
+      text.match(/\b(cube|cuboid|sphere|cylinder|cone|pyramid|plane|line)\b/i);
     const hexMatch = text.match(/#[0-9a-f]{3,8}\b/i);
     const colorMatch = text.match(/color\s*[:=]\s*([^\s,;]+)/i);
     const nextShape = shapeMatch ? shapeMatch[1].toLowerCase() : currentShape;
@@ -2234,10 +2227,7 @@ export function bootstrapApp() {
   }
 
   function removeMesh(mesh) {
-    if (!mesh) return;
-    world.scene.remove(mesh);
-    mesh.geometry?.dispose?.();
-    mesh.material?.dispose?.();
+    sceneRuntime.removeMesh(mesh);
   }
 
   function beginDragSession(mesh, clientX, clientY, pointerId = null) {
@@ -2302,6 +2292,7 @@ export function bootstrapApp() {
       world.setControlsEnabled(true);
     }
     if (draggedMesh) {
+      sceneRuntime.notifySceneChanged("drag-end", draggedMesh);
       setStatus(`Dragged ${draggedMesh.userData?.label || "object"}`, "ok");
       renderObjectList();
     }
@@ -2354,9 +2345,8 @@ export function bootstrapApp() {
     endDragSession();
     transformSession = null;
     rotationSession = null;
-    nextObjectSerial = 0;
     disposePlacementPreview();
-    while (placedMeshes.length) removeMesh(placedMeshes.pop());
+    sceneRuntime.clear("clear-all");
     setActiveMesh(null);
     setStatus("Cleared scene", "idle");
     renderObjectList();
@@ -2364,20 +2354,7 @@ export function bootstrapApp() {
   }
 
   function serializeScene() {
-    return placedMeshes.map((m) => ({
-      label: m.userData.label || null,
-      objectSerial: m.userData.objectSerial || null,
-      shape: m.userData.shape || "cube",
-      baseSize: m.userData.baseSize || 1,
-      floorLocked: m.userData.floorLocked !== false,
-      color: `#${m.material.color.getHexString()}`,
-      lineStart: Array.isArray(m.userData.lineStart) ? m.userData.lineStart : null,
-      lineEnd: Array.isArray(m.userData.lineEnd) ? m.userData.lineEnd : null,
-      position: m.position.toArray(),
-      rotation: [m.rotation.x, m.rotation.y, m.rotation.z],
-      rotationY: m.rotation.y,
-      scale: m.scale.toArray(),
-    }));
+    return sceneRuntime.exportLegacyScene();
   }
 
   function saveScene() {
@@ -2393,41 +2370,8 @@ export function bootstrapApp() {
   }
 
   function loadScene(data) {
-    clearAll();
-    data.forEach((item) => {
-      const shape = item.shape || "cube";
-      const size = Number(item.baseSize || 1);
-      const color = item.color || "#7cf7e4";
-      const mesh = shape === "line" && Array.isArray(item.lineStart) && Array.isArray(item.lineEnd)
-        ? world.buildLineMesh(
-          new THREE.Vector3().fromArray(item.lineStart),
-          new THREE.Vector3().fromArray(item.lineEnd),
-          size,
-          color
-        )
-        : world.buildMesh(shape, size, color);
-      if (shape !== "line") {
-        mesh.position.fromArray(item.position || [0, 0.5, 0]);
-      }
-      if (Array.isArray(item.rotation)) mesh.rotation.set(
-        Number(item.rotation[0] || 0),
-        Number(item.rotation[1] || 0),
-        Number(item.rotation[2] || 0)
-      );
-      else mesh.rotation.y = Number(item.rotationY || 0);
-      if (Array.isArray(item.scale)) mesh.scale.fromArray(item.scale);
-      if (item.objectSerial) mesh.userData.objectSerial = Number(item.objectSerial);
-      if (item.label) mesh.userData.label = item.label;
-      mesh.userData.shape = shape;
-      mesh.userData.baseSize = size;
-      mesh.userData.floorLocked = item.floorLocked !== false;
-      if (Array.isArray(item.lineStart)) mesh.userData.lineStart = item.lineStart;
-      if (Array.isArray(item.lineEnd)) mesh.userData.lineEnd = item.lineEnd;
-      ensureMeshIdentity(mesh);
-      updateMeshMetadata(mesh);
-      world.scene.add(mesh);
-      placedMeshes.push(mesh);
-    });
+    sceneRuntime.loadLegacyScene(data, "legacy-load");
+    placedMeshes.forEach((mesh) => updateMeshMetadata(mesh));
     setStatus(`Loaded ${placedMeshes.length} shapes`, "ok");
     renderObjectList();
     refreshDebug();
@@ -3164,23 +3108,10 @@ export function bootstrapApp() {
       // Delete selected object
       if (activeMesh && placedMeshes.includes(activeMesh)) {
         event.preventDefault();
-        const idx = placedMeshes.indexOf(activeMesh);
-        if (idx > -1) {
-          const mesh = placedMeshes[idx];
-          placedMeshes.splice(idx, 1);
-          world.scene.remove(mesh);
-          if (mesh.geometry) mesh.geometry.dispose();
-          if (mesh.material) {
-            if (Array.isArray(mesh.material)) {
-              mesh.material.forEach(m => m.dispose());
-            } else {
-              mesh.material.dispose();
-            }
-          }
-          setActiveMesh(null);
-          setStatus("Object deleted", "ok");
-          renderObjectList();
-        }
+        removeMesh(activeMesh);
+        setActiveMesh(null);
+        setStatus("Object deleted", "ok");
+        renderObjectList();
       }
     }
   });
@@ -3247,11 +3178,56 @@ export function bootstrapApp() {
   stopBtn.addEventListener("click", stop);
   window.addEventListener("beforeunload", stop);
 
+  sceneRuntime.on("objects", () => {
+    renderObjectList();
+    refreshDebug();
+  });
+
   refreshDebug();
   renderObjectList();
   setStatus("Ready. Start camera to begin.", "idle");
   setIntent("ready", "idle");
 
-  // Expose world for tutor integration
-  return { world };
+  const sceneApi = {
+    snapshot: () => sceneRuntime.snapshot(),
+    loadSnapshot: (snapshot, reason = "snapshot-load") => {
+      sceneRuntime.loadSnapshot(snapshot, reason);
+      renderObjectList();
+      refreshDebug();
+      return sceneRuntime.snapshot();
+    },
+    clearScene: () => clearAll(),
+    addObject: (objectSpec, options = {}) => {
+      const mesh = sceneRuntime.addObject(objectSpec, options);
+      updateMeshMetadata(mesh);
+      renderObjectList();
+      refreshDebug();
+      return mesh;
+    },
+    addObjects: (objectSpecs, options = {}) => {
+      const meshes = sceneRuntime.addObjects(objectSpecs, options);
+      meshes.forEach((mesh) => updateMeshMetadata(mesh));
+      renderObjectList();
+      refreshDebug();
+      return meshes;
+    },
+    removeObject: (target) => {
+      const mesh = sceneRuntime.getMesh(target);
+      if (!mesh) return false;
+      if (mesh === activeMesh) setActiveMesh(null);
+      removeMesh(mesh);
+      renderObjectList();
+      refreshDebug();
+      return true;
+    },
+    selectObject: (target) => {
+      const mesh = sceneRuntime.getMesh(target);
+      setActiveMesh(mesh || null);
+      return mesh;
+    },
+    resetView: onResetView,
+    onSceneChange: (handler) => sceneRuntime.on("change", () => handler(sceneRuntime.snapshot())),
+  };
+
+  return { world, sceneRuntime, sceneApi };
 }
