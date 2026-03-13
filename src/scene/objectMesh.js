@@ -125,6 +125,7 @@ export function applySceneObjectToMesh(world, mesh, objectSpec) {
   mesh.userData.sceneParams = structuredClone(spec.params);
   mesh.userData.sceneMetadata = { ...spec.metadata };
   mesh.userData.baseSize = paramsToBaseSize(spec.shape, spec.params);
+  mesh.userData.baseOpacity = spec.shape === "plane" ? 0.72 : 0.9;
   mesh.userData.floorLocked = spec.shape !== "line" && spec.shape !== "plane";
   if (spec.shape === "line") {
     mesh.userData.lineStart = [...spec.params.start];

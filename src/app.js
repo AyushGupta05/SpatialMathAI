@@ -1511,6 +1511,75 @@ export function bootstrapApp() {
     return (baseRadius * scale) + TRANSFORM_SELECT_BUFFER;
   }
 
+  function containmentFadeTarget(mesh) {
+    if (!mesh) return null;
+    const shape = mesh.userData?.shape || "cube";
+    if (shape === "line") return null;
+    return {
+      opacity: mesh.userData?.baseOpacity ?? (shape === "plane" ? 0.72 : 0.9),
+      depthWrite: true,
+    };
+  }
+
+  function setContainmentFade(mesh, faded) {
+    if (!mesh?.material) return;
+    const base = containmentFadeTarget(mesh);
+    if (!base) return;
+
+    mesh.userData.containsNestedObject = Boolean(faded);
+    mesh.material.transparent = true;
+    mesh.material.opacity = faded ? Math.min(base.opacity, 0.38) : base.opacity;
+    mesh.material.depthWrite = faded ? false : base.depthWrite;
+  }
+
+  function refreshContainedObjectVisibility() {
+    const outerBounds = new THREE.Box3();
+    const innerBounds = new THREE.Box3();
+    const outerSize = new THREE.Vector3();
+    const innerSize = new THREE.Vector3();
+    const innerCenter = new THREE.Vector3();
+    const candidates = placedMeshes.filter((mesh) => mesh && containmentFadeTarget(mesh));
+
+    for (const mesh of candidates) {
+      setContainmentFade(mesh, false);
+    }
+
+    for (const outerMesh of candidates) {
+      outerBounds.setFromObject(outerMesh);
+      if (outerBounds.isEmpty()) continue;
+      outerBounds.getSize(outerSize);
+      if (outerSize.lengthSq() <= 1e-6) continue;
+
+      const margin = Math.max(0.02, Math.min(0.18, Math.min(outerSize.x, outerSize.y, outerSize.z) * 0.08));
+      const outerVolume = outerSize.x * outerSize.y * outerSize.z;
+
+      for (const innerMesh of placedMeshes) {
+        if (!innerMesh || innerMesh === outerMesh) continue;
+        innerBounds.setFromObject(innerMesh);
+        if (innerBounds.isEmpty()) continue;
+
+        innerBounds.getCenter(innerCenter);
+        innerBounds.getSize(innerSize);
+        const innerVolume = Math.max(1e-6, innerSize.x * innerSize.y * innerSize.z);
+        if (outerVolume <= innerVolume * 1.04) continue;
+
+        const insideOuter = (
+          innerCenter.x >= outerBounds.min.x + margin &&
+          innerCenter.x <= outerBounds.max.x - margin &&
+          innerCenter.y >= outerBounds.min.y + margin &&
+          innerCenter.y <= outerBounds.max.y - margin &&
+          innerCenter.z >= outerBounds.min.z + margin &&
+          innerCenter.z <= outerBounds.max.z - margin
+        );
+
+        if (insideOuter) {
+          setContainmentFade(outerMesh, true);
+          break;
+        }
+      }
+    }
+  }
+
   function syncSelectionMarker(mesh) {
     if (!mesh) return;
     selectionBounds.setFromObject(mesh);
@@ -3524,6 +3593,7 @@ export function bootstrapApp() {
   window.addEventListener("beforeunload", stop);
 
   sceneRuntime.on("objects", () => {
+    refreshContainedObjectVisibility();
     renderObjectList();
     refreshDebug();
   });
