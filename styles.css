@@ -172,6 +172,7 @@ select, input[type="color"] {
 }
 select {
   appearance: none; padding: 0 34px 0 12px;
+  color-scheme: dark;
   background-image:
     linear-gradient(45deg, transparent 50%, var(--accent) 50%),
     linear-gradient(135deg, var(--accent) 50%, transparent 50%),
@@ -179,6 +180,16 @@ select {
   background-position: calc(100% - 18px) 16px, calc(100% - 12px) 16px, 0 0;
   background-size: 6px 6px, 6px 6px, 100% 100%;
   background-repeat: no-repeat;
+}
+select option {
+  background: #09182c;
+  color: #effbff;
+}
+select option:checked,
+select option:hover,
+select option:focus {
+  background: #ffd166;
+  color: #07111d;
 }
 input[type="color"] { padding: 4px; cursor: pointer; }
 input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
@@ -399,8 +410,11 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 5px; }
 }
 .object-item + .object-item { margin-top: 6px; }
 .object-item.is-active {
-  border-color: rgba(122, 247, 228, 0.34); background: rgba(9, 24, 40, 0.94);
-  box-shadow: inset 0 1px 0 rgba(126, 214, 255, 0.08);
+  border-color: rgba(255, 209, 102, 0.82);
+  background:
+    linear-gradient(180deg, rgba(48, 32, 6, 0.94), rgba(24, 17, 7, 0.94)),
+    radial-gradient(circle at top right, rgba(255, 209, 102, 0.14), transparent 42%);
+  box-shadow: inset 0 1px 0 rgba(255, 232, 173, 0.18), 0 0 0 1px rgba(255, 209, 102, 0.18);
 }
 .object-item-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; color: var(--text); font-size: 0.82rem; }
 .object-swatch {
@@ -409,6 +423,7 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 5px; }
 }
 .object-label { font-family: "Exo 2", "Space Grotesk", sans-serif; letter-spacing: 0.05em; }
 .object-state { margin-left: auto; color: var(--accent); font-size: 0.62rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
+.object-item.is-active .object-state { color: #ffe39c; }
 .object-controls { display: grid; gap: 8px; }
 .object-empty { color: var(--muted); font-size: 0.72rem; line-height: 1.45; padding: 10px; }
 
@@ -801,13 +816,18 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 5px; }
 }
 .dimension-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: 10px;
+  margin-bottom: 10px;
 }
 .dimension-field-wrap {
   display: grid;
-  gap: 4px;
+  gap: 6px;
+}
+.dimension-slider-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
 }
 .dimension-label {
   color: rgba(235, 241, 247, 0.84);
@@ -816,16 +836,51 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 5px; }
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
+.dimension-value {
+  color: #ffe39c;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
 .dimension-field {
   width: 100%;
   min-width: 0;
-  height: 30px;
-  padding: 0 8px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 6px;
-  background: rgba(241, 241, 241, 0.06);
-  color: #f2f6fa;
-  font-size: 0.78rem;
+  height: 8px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  appearance: none;
+  background: linear-gradient(90deg, rgba(122, 247, 228, 0.28), rgba(255, 209, 102, 0.36));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+}
+.dimension-field::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(7, 17, 29, 0.92);
+  border-radius: 50%;
+  background: #ffd166;
+  box-shadow: 0 0 0 3px rgba(255, 209, 102, 0.18);
+}
+.dimension-field::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(7, 17, 29, 0.92);
+  border-radius: 50%;
+  background: #ffd166;
+  box-shadow: 0 0 0 3px rgba(255, 209, 102, 0.18);
+}
+.dimension-field::-moz-range-track {
+  height: 8px;
+  border: none;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(122, 247, 228, 0.28), rgba(255, 209, 102, 0.36));
+}
+.dimension-field:focus-visible {
+  outline: 2px solid rgba(255, 209, 102, 0.34);
+  outline-offset: 3px;
 }
 .transform-grid { display: grid; grid-template-columns: 64px repeat(3, minmax(0, 1fr)); gap: 5px; align-items: center; margin-bottom: 5px; }
 .transform-grid:last-child { margin-bottom: 0; }

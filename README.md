@@ -1,83 +1,67 @@
-# SpatialMath Nova — Hand Sculpt
+# SpatialMath Nova
 
-MediaPipe Hands + Three.js prototype for gesture-based 3D shape creation.
+SpatialMath Nova is an interactive 3D math and building sandbox. It combines hand tracking, a browser-based 3D scene, and a small Node server to help users create, manipulate, and evaluate spatial scenes.
 
-## Architecture (modular)
-- `src/signals/interactionPipeline.js` — stable interaction state (~30 FPS semantics)
-- `src/calibration/store.js` — calibration persistence + scale factor
-- `src/core/geometry.js` — deterministic geometry formulas
-- `src/render/world.js` — 3D scene + camera + projection
-- `src/state/store.js` — app state object
-- `src/app.js` — orchestration + UI wiring
+## What it does
 
-## Features
-- Real-time webcam hand tracking (MediaPipe Tasks Vision)
-- Three.js 3D studio with orbit controls
-- Gesture actions:
-  - Spawn mode: pinch (thumb + index) → place selected shape
-  - Transform mode: pinch near object to grab/move; spread index-middle fingers to scale
-  - Fist → delete the object closest to the palm
-- Shape types: cube, cuboid, sphere, cylinder
-- Adjustable base size + color
-- Scene save/load JSON for quick demo resets
-- Transform precision controls: position/rotation snap modes + rotation step
-- Live interaction intent badge for user guidance
-- Long-session guardrails: mesh budget + auto-pause on hidden tab
-- Sticky transform lock mode + visual rotation guide arrow
-- Calibration presets for desk/room/far camera distance
-- Full hand skeleton debug overlay (not just cursor dot)
-- Palm-proxy in 3D world for spatial intent visualization
-- Control split: palm drives transform movement, fingers drive placement/selection
-- Two-hand overlay rendering with neon pulse fingertip cues
-- Improved pinch consistency via wider hysteresis + stable-frame confirmation
+- Tracks hand gestures in the browser for spatial interaction
+- Renders and edits 3D objects with a live scene view
+- Serves AI-assisted planning, tutoring, voice, challenge, and build APIs
+- Includes test coverage for the server planning/build flows
 
-## Offline tuning (Python)
-Use `tools/signal_tuner.py` to tune EMA and pinch hysteresis from recorded CSV traces.
+## Setup
+
+### Requirements
+
+- Node.js 20+
+- npm
+- A webcam for hand tracking
+
+### Install
 
 ```bash
-python3 tools/signal_tuner.py --input pinch_series.csv --alpha 0.38 --pinch-on 0.048 --pinch-off 0.062
+npm install
 ```
 
-Synthetic stress check:
-```bash
-python3 tools/stress_simulator.py
+### Environment
+
+Create a `.env.local` file in the project root.
+
+The app can run without AI features, but AWS credentials are needed for Bedrock/Nova-powered routes:
+
+```env
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=your_key
+AWS_SECRET_ACCESS_KEY=your_secret
+AWS_SESSION_TOKEN=your_session_token
 ```
-
-## TensorFlow gesture signal model
-Train a 6-class gesture classifier for project signals:
-- pinch_place (thumb+index) → place object
-- fist_delete → delete object nearest to palm
-- open_palm_cycle → change shape
-- peace_draw → draw lines
-- point_rotate → rotate object
-- neutral_cancel (flat open palm still) → neutral/cancel
-
-Train:
-```bash
-python3 tools/train_gesture_model_tf.py --samples-per-class 2200 --epochs 45
-```
-
-Stress test:
-```bash
-python3 tools/stress_test_gesture_model_tf.py --per-class 1200
-```
-
-Artifacts are saved in `models/tf_gesture/`:
-- `gesture_signal_model.keras`
-- `gesture_labels.json`
-- `gesture_train_metrics.json`
-- `gesture_stress_report.json`
 
 ## Run
-Serve this folder with any static server and open `index.html`.
 
-Example:
+Start the app:
+
 ```bash
-python3 -m http.server 8090
+npm run dev
 ```
-Then open `http://localhost:8090`.
 
-## Camera troubleshooting
-- Use `localhost` or HTTPS (camera access is blocked on insecure non-local origins).
-- If preferred constraints fail, app now falls back to a generic camera request.
-- Check in-app status pill for explicit camera/model error reason.
+Or run it without watch mode:
+
+```bash
+npm start
+```
+
+Then open [http://localhost:3000/index.html](http://localhost:3000/index.html).
+
+## Test
+
+```bash
+npm test
+```
+
+## Optional Python tools
+
+This repo also includes Python utilities in `tools/` for gesture-model training, stress testing, and signal tuning. Install them with:
+
+```bash
+pip install -r requirements.txt
+```

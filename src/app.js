@@ -148,19 +148,12 @@ export function bootstrapApp() {
   const lineDepthDirection = new THREE.Vector3();
 
   function setActiveMesh(mesh) {
-    if (activeMesh === mesh) return;
     if (activeMesh?.material?.emissive) {
       const baseEmissive = activeMesh.userData?.baseEmissive ?? 0x00111d;
       activeMesh.material.emissive.setHex(baseEmissive);
     }
-    activeMesh = mesh;
-    if (activeMesh?.material?.emissive) {
-      if (activeMesh.userData.baseEmissive == null) {
-        activeMesh.userData.baseEmissive = activeMesh.material.emissive.getHex();
-      }
-      activeMesh.material.emissive.setHex(0x2ccbd3);
-    }
-    if (!activeMesh) {
+    if (!mesh) {
+      activeMesh = null;
       sceneRuntime.setSelection(null);
       selectionRing.visible = false;
       selectionRing.scale.setScalar(1);
@@ -171,6 +164,14 @@ export function bootstrapApp() {
         detail: { objectId: null, mesh: null },
       }));
       return;
+    }
+    if (activeMesh === mesh) return;
+    activeMesh = mesh;
+    if (activeMesh?.material?.emissive) {
+      if (activeMesh.userData.baseEmissive == null) {
+        activeMesh.userData.baseEmissive = activeMesh.material.emissive.getHex();
+      }
+      activeMesh.material.emissive.setHex(0xffc857);
     }
     sceneRuntime.setSelection(activeMesh);
     if (shapeTypeEl && activeMesh.userData?.shape) shapeTypeEl.value = activeMesh.userData.shape;
@@ -1219,6 +1220,34 @@ export function bootstrapApp() {
     session.startRotationY = session.mesh.rotation.y || 0;
     session.startLeftWristAngle = computeWristAngle(leftHand);
     session.startRightWristAngle = computeWristAngle(rightHand);
+    session.intent = null;
+  }
+
+  function resolveTransformIntent(session, currentSpan, leftWristAngle, rightWristAngle, rotatePoseActive) {
+    if (!session) return null;
+    if (session.intent === "scale") return session.intent;
+    if (session.intent === "rotate" && rotatePoseActive) return session.intent;
+    if (session.intent === "rotate" && !rotatePoseActive) {
+      session.intent = null;
+    }
+
+    const spanBaseline = Math.max(MIN_TRANSFORM_SPAN, session.startSpan || MIN_TRANSFORM_SPAN);
+    const spanDeltaRatio = Math.abs((currentSpan - spanBaseline) / spanBaseline);
+    const rotationYDelta = leftWristAngle != null && session.startLeftWristAngle != null
+      ? Math.abs(shortestAngleDelta(session.startLeftWristAngle, leftWristAngle))
+      : 0;
+    const rotationXDelta = rightWristAngle != null && session.startRightWristAngle != null
+      ? Math.abs(shortestAngleDelta(session.startRightWristAngle, rightWristAngle))
+      : 0;
+    const rotationDelta = Math.max(rotationXDelta, rotationYDelta);
+
+    if (spanDeltaRatio >= 0.08 && spanDeltaRatio >= (rotationDelta * 1.2)) {
+      session.intent = "scale";
+    } else if (rotatePoseActive && rotationDelta >= 0.16) {
+      session.intent = "rotate";
+    }
+
+    return session.intent;
   }
 
   function beginTransformSession(mesh, hitA, hitB, leftHand, rightHand, now) {
@@ -1235,9 +1264,10 @@ export function bootstrapApp() {
       startRotationY: mesh.rotation.y || 0,
       startLeftWristAngle: computeWristAngle(leftHand),
       startRightWristAngle: computeWristAngle(rightHand),
+      intent: null,
     };
     selectionRing.userData.pulseStartAt = now;
-    setStatus("Transform locked: spread to resize, left wrist rotates Y, right wrist rotates X", "ok");
+    setStatus("Transform locked: resize normally or show the rotate pose", "ok");
     return true;
   }
 
@@ -2008,6 +2038,58 @@ export function bootstrapApp() {
     return indexExtended && curledCount >= 3 && thumbRelaxed;
   }
 
+  function isRotatePose(hand) {
+    if (!hand) return false;
+    const scale = palmScale(hand);
+    const wrist = hand[0];
+    const palmCenter = {
+      x: (hand[0].x + hand[5].x + hand[9].x + hand[13].x + hand[17].x) / 5,
+      y: (hand[0].y + hand[5].y + hand[9].y + hand[13].y + hand[17].y) / 5,
+      z: (hand[0].z + hand[5].z + hand[9].z + hand[13].z + hand[17].z) / 5,
+    };
+    const indexTip = hand[8];
+    const indexPip = hand[6];
+    const indexMcp = hand[5];
+    const middleTip = hand[12];
+    const middlePip = hand[10];
+    const middleMcp = hand[9];
+    const ringTip = hand[16];
+    const ringPip = hand[14];
+    const ringMcp = hand[13];
+    const pinkyTip = hand[20];
+    const pinkyPip = hand[18];
+    const pinkyMcp = hand[17];
+    const thumbTip = hand[4];
+    const thumbIp = hand[3];
+    const thumbMcp = hand[2];
+
+    const indexExtended =
+      (lmkDist(indexTip, palmCenter) / scale) > 1.1 &&
+      (lmkDist(indexTip, wrist) / scale) > 1.4 &&
+      lmkDist(indexTip, wrist) > lmkDist(indexPip, wrist) * 1.12 &&
+      indexTip.y < indexPip.y - 0.03 &&
+      indexTip.y < indexMcp.y - 0.06;
+    const middleExtended =
+      (lmkDist(middleTip, palmCenter) / scale) > 1.08 &&
+      (lmkDist(middleTip, wrist) / scale) > 1.35 &&
+      lmkDist(middleTip, wrist) > lmkDist(middlePip, wrist) * 1.1 &&
+      middleTip.y < middlePip.y - 0.025 &&
+      middleTip.y < middleMcp.y - 0.05;
+    const ringCurled =
+      (lmkDist(ringTip, palmCenter) / scale) < 1.02 &&
+      lmkDist(ringTip, wrist) <= Math.max(lmkDist(ringPip, wrist), lmkDist(ringMcp, wrist)) * 1.08;
+    const pinkyCurled =
+      (lmkDist(pinkyTip, palmCenter) / scale) < 1.03 &&
+      lmkDist(pinkyTip, wrist) <= Math.max(lmkDist(pinkyPip, wrist), lmkDist(pinkyMcp, wrist)) * 1.08;
+    const fingerSplitWide = (lmkDist(indexTip, middleTip) / scale) > 0.34;
+    const thumbOpen =
+      (lmkDist(thumbTip, palmCenter) / scale) > 1.02 &&
+      (lmkDist(thumbTip, thumbMcp) / scale) > 0.48 &&
+      lmkDist(thumbTip, wrist) > lmkDist(thumbIp, wrist) * 1.04;
+
+    return indexExtended && middleExtended && ringCurled && pinkyCurled && fingerSplitWide && thumbOpen;
+  }
+
   function classifySignal(primary, interaction) {
     if (!primary || !interaction?.handsDetected) return null;
     if (interaction.mode === "spawn" && interaction.deleteCandidate && isFistPose(primary)) {
@@ -2072,43 +2154,72 @@ export function bootstrapApp() {
     return placedMeshes.find((item) => Number(item.userData?.objectSerial) === Number(objectSerial)) || null;
   }
 
+  function formatDimensionValue(value, decimals = 2) {
+    return Number(value || 0).toFixed(decimals);
+  }
+
+  function buildDimensionField(key, label, value, options = {}) {
+    const numericValue = Math.max(0.01, Number(value || 0));
+    const step = Number(options.step ?? 0.05);
+    const min = Math.max(0.01, Number(options.min ?? 0.1));
+    const decimals = Number.isInteger(options.decimals)
+      ? options.decimals
+      : (step >= 1 ? 0 : step >= 0.1 ? 1 : 2);
+    const dynamicMax = Math.max(
+      numericValue,
+      Number(options.defaultMax ?? 4),
+      numericValue * Number(options.maxMultiplier ?? 2.4),
+      min + step
+    );
+
+    return {
+      key,
+      label,
+      value: numericValue,
+      step,
+      min,
+      max: Number(dynamicMax.toFixed(decimals)),
+      decimals,
+    };
+  }
+
   function dimensionFieldsForMesh(mesh) {
     const shape = mesh?.userData?.shape || "cube";
     const params = sceneParamsFromMesh(mesh);
 
     switch (shape) {
       case "cube":
-        return [{ key: "size", label: "Size", value: params.size, step: 0.01 }];
+        return [buildDimensionField("size", "Size", params.size, { min: 0.2, defaultMax: 5 })];
       case "cuboid":
         return [
-          { key: "width", label: "W", value: params.width, step: 0.01 },
-          { key: "height", label: "H", value: params.height, step: 0.01 },
-          { key: "depth", label: "D", value: params.depth, step: 0.01 },
+          buildDimensionField("width", "Width", params.width, { min: 0.2, defaultMax: 5 }),
+          buildDimensionField("height", "Height", params.height, { min: 0.2, defaultMax: 5 }),
+          buildDimensionField("depth", "Depth", params.depth, { min: 0.2, defaultMax: 5 }),
         ];
       case "sphere":
-        return [{ key: "radius", label: "Radius", value: params.radius, step: 0.01 }];
+        return [buildDimensionField("radius", "Radius", params.radius, { min: 0.1, defaultMax: 3.5 })];
       case "cylinder":
       case "cone":
         return [
-          { key: "radius", label: "Radius", value: params.radius, step: 0.01 },
-          { key: "height", label: "Height", value: params.height, step: 0.01 },
+          buildDimensionField("radius", "Radius", params.radius, { min: 0.1, defaultMax: 3.5 }),
+          buildDimensionField("height", "Height", params.height, { min: 0.2, defaultMax: 6 }),
         ];
       case "pyramid":
         return [
-          { key: "base", label: "Base", value: params.base, step: 0.01 },
-          { key: "height", label: "Height", value: params.height, step: 0.01 },
+          buildDimensionField("base", "Base", params.base, { min: 0.2, defaultMax: 5 }),
+          buildDimensionField("height", "Height", params.height, { min: 0.2, defaultMax: 6 }),
         ];
       case "plane":
         return [
-          { key: "width", label: "W", value: params.width, step: 0.01 },
-          { key: "depth", label: "D", value: params.depth, step: 0.01 },
+          buildDimensionField("width", "Width", params.width, { min: 0.4, defaultMax: 8, step: 0.1, decimals: 1 }),
+          buildDimensionField("depth", "Depth", params.depth, { min: 0.4, defaultMax: 8, step: 0.1, decimals: 1 }),
         ];
       case "pointMarker":
-        return [{ key: "radius", label: "Radius", value: params.radius, step: 0.01 }];
+        return [buildDimensionField("radius", "Radius", params.radius, { min: 0.05, defaultMax: 1.4, step: 0.02 })];
       case "line":
         return [
-          { key: "length", label: "Length", value: distanceBetween(params.start, params.end), step: 0.01 },
-          { key: "thickness", label: "Thickness", value: params.thickness, step: 0.01 },
+          buildDimensionField("length", "Length", distanceBetween(params.start, params.end), { min: 0.2, defaultMax: 10, step: 0.1, decimals: 1 }),
+          buildDimensionField("thickness", "Thickness", params.thickness, { min: 0.02, defaultMax: 0.8, step: 0.02 }),
         ];
       default:
         return [];
@@ -2276,7 +2387,7 @@ export function bootstrapApp() {
     updateMeshMetadata(mesh);
     updateGeometryMetrics(shape, mesh.userData.baseSize || currentSize, mesh);
     if (mesh === activeMesh && mesh.material?.emissive) {
-      mesh.material.emissive.setHex(0x2ccbd3);
+      mesh.material.emissive.setHex(0xffc857);
     }
     sceneRuntime.notifySceneChanged("appearance", mesh);
     return true;
@@ -2374,15 +2485,19 @@ export function bootstrapApp() {
           <div class="dimension-grid">
             ${dimensions.map((field) => `
               <label class="dimension-field-wrap">
-                <span class="dimension-label">${escapeHtml(field.label)}</span>
+                <span class="dimension-slider-head">
+                  <span class="dimension-label">${escapeHtml(field.label)}</span>
+                  <span class="dimension-value" data-param-value="${escapeHtml(field.key)}">${escapeHtml(formatDimensionValue(field.value, field.decimals))}</span>
+                </span>
                 <input
-                  class="dimension-field"
-                  type="number"
-                  min="0.01"
+                  class="dimension-field dimension-slider"
+                  type="range"
+                  min="${escapeHtml(field.min.toString())}"
+                  max="${escapeHtml(field.max.toString())}"
                   step="${escapeHtml(field.step.toString())}"
                   data-param="${escapeHtml(field.key)}"
                   data-object-serial="${mesh.userData.objectSerial}"
-                  value="${escapeHtml(Number(field.value || 0).toFixed(2))}"
+                  value="${escapeHtml(formatDimensionValue(field.value, field.decimals))}"
                 />
               </label>
             `).join("")}
@@ -2891,8 +3006,8 @@ export function bootstrapApp() {
         : null;
       const thumbsUpPose = autoMode === "spawn" && primary ? isThumbsUpPose(primary) : false;
       const thumbsDownPose = autoMode === "spawn" && primary ? isThumbsDownPose(primary) : false;
-      const twoHandPointPose = autoMode === "transform" && primary && secondary
-        ? isPointPose(primary) && isPointPose(secondary)
+      const twoHandRotatePose = autoMode === "transform" && primary && secondary
+        ? isRotatePose(primary) && isRotatePose(secondary)
         : false;
       const rawSignal = autoMode === "spawn" && primary
         ? classifySignal(primary, {
@@ -2902,7 +3017,7 @@ export function bootstrapApp() {
           pointPose: false,
           deleteCandidate: deleteTarget,
         })
-        : (twoHandPointPose ? SIGNALS.POINT_ROTATE : null);
+        : (twoHandRotatePose ? SIGNALS.POINT_ROTATE : null);
       if (rawSignal === SIGNALS.FIST_DELETE) {
         if (fistHoldStartAt == null) fistHoldStartAt = now;
       } else {
@@ -2945,7 +3060,7 @@ export function bootstrapApp() {
         handsDetected: handCount > 0,
         handCount,
         mode: autoMode,
-        pointPose: twoHandPointPose,
+        pointPose: twoHandRotatePose,
       };
 
       drawDebug(hands, interaction, visualHands);
@@ -3073,43 +3188,53 @@ export function bootstrapApp() {
           }
 
           const currentSpan = Math.max(MIN_TRANSFORM_SPAN, planarDistance(primaryPalmHit, secondaryPalmHit));
-          const spanRatio = clamp(
-            currentSpan / Math.max(MIN_TRANSFORM_SPAN, transformSession.startSpan || MIN_TRANSFORM_SPAN),
-            MIN_MESH_SCALE,
-            MAX_MESH_SCALE
-          );
-          const shape = transformSession.mesh.userData?.shape || shapeTypeEl.value;
-          const targetParams = scaleSceneParams(shape, transformSession.startParams, spanRatio);
-          const smoothedParams = interpolateSceneParams(
-            shape,
-            sceneParamsFromMesh(transformSession.mesh),
-            targetParams,
-            TRANSFORM_SCALE_SMOOTHING
-          );
-          applySceneObjectToMesh(world, transformSession.mesh, buildSceneObjectForMesh(transformSession.mesh, { params: smoothedParams }));
-          if (transformSession.mesh.userData?.shape !== "line" && transformSession.mesh.userData?.floorLocked !== false) {
-            alignMeshToGround(transformSession.mesh);
-          }
-
           const leftWristAngle = computeWristAngle(primary);
           const rightWristAngle = computeWristAngle(secondary);
-          if (leftWristAngle != null && transformSession.startLeftWristAngle != null) {
-            const deltaY = shortestAngleDelta(transformSession.startLeftWristAngle, leftWristAngle);
-            const targetRotationY = snapRotation(transformSession.startRotationY + (deltaY * 2));
-            transformSession.mesh.rotation.y = THREE.MathUtils.lerp(
-              transformSession.mesh.rotation.y,
-              targetRotationY,
-              TRANSFORM_ROTATION_SMOOTHING
+          const transformIntent = resolveTransformIntent(
+            transformSession,
+            currentSpan,
+            leftWristAngle,
+            rightWristAngle,
+            twoHandRotatePose
+          );
+
+          if (transformIntent === "scale") {
+            const spanRatio = clamp(
+              currentSpan / Math.max(MIN_TRANSFORM_SPAN, transformSession.startSpan || MIN_TRANSFORM_SPAN),
+              MIN_MESH_SCALE,
+              MAX_MESH_SCALE
             );
-          }
-          if (rightWristAngle != null && transformSession.startRightWristAngle != null) {
-            const deltaX = shortestAngleDelta(transformSession.startRightWristAngle, rightWristAngle);
-            const targetRotationX = snapRotation(transformSession.startRotationX + (deltaX * 2));
-            transformSession.mesh.rotation.x = THREE.MathUtils.lerp(
-              transformSession.mesh.rotation.x,
-              targetRotationX,
-              TRANSFORM_ROTATION_SMOOTHING
+            const shape = transformSession.mesh.userData?.shape || shapeTypeEl.value;
+            const targetParams = scaleSceneParams(shape, transformSession.startParams, spanRatio);
+            const smoothedParams = interpolateSceneParams(
+              shape,
+              sceneParamsFromMesh(transformSession.mesh),
+              targetParams,
+              TRANSFORM_SCALE_SMOOTHING
             );
+            applySceneObjectToMesh(world, transformSession.mesh, buildSceneObjectForMesh(transformSession.mesh, { params: smoothedParams }));
+            if (transformSession.mesh.userData?.shape !== "line" && transformSession.mesh.userData?.floorLocked !== false) {
+              alignMeshToGround(transformSession.mesh);
+            }
+          } else if (transformIntent === "rotate") {
+            if (leftWristAngle != null && transformSession.startLeftWristAngle != null) {
+              const deltaY = shortestAngleDelta(transformSession.startLeftWristAngle, leftWristAngle);
+              const targetRotationY = snapRotation(transformSession.startRotationY + (deltaY * 2));
+              transformSession.mesh.rotation.y = THREE.MathUtils.lerp(
+                transformSession.mesh.rotation.y,
+                targetRotationY,
+                TRANSFORM_ROTATION_SMOOTHING
+              );
+            }
+            if (rightWristAngle != null && transformSession.startRightWristAngle != null) {
+              const deltaX = shortestAngleDelta(transformSession.startRightWristAngle, rightWristAngle);
+              const targetRotationX = snapRotation(transformSession.startRotationX + (deltaX * 2));
+              transformSession.mesh.rotation.x = THREE.MathUtils.lerp(
+                transformSession.mesh.rotation.x,
+                targetRotationX,
+                TRANSFORM_ROTATION_SMOOTHING
+              );
+            }
           }
 
           updateMeshMetadata(transformSession.mesh);
@@ -3161,7 +3286,13 @@ export function bootstrapApp() {
           setIntent("ready to place", "idle");
         }
       } else if (transformSession && handCount >= 2) {
-        setIntent("spread to resize, left wrist rotates Y, right wrist rotates X", "ok");
+        if (transformSession.intent === "scale") {
+          setIntent("resize locked", "ok");
+        } else if (transformSession.intent === "rotate") {
+          setIntent("rotation locked", "ok");
+        } else {
+          setIntent("resize normally or show the rotate pose", "ok");
+        }
       } else if (transformSession) {
         setIntent("transform locked", "ok");
       } else if (handCount >= 2) {
@@ -3344,7 +3475,13 @@ export function bootstrapApp() {
     row.querySelectorAll(".dimension-field").forEach((input) => {
       const field = dimensions.find((candidate) => candidate.key === input.dataset.param);
       if (field) {
-        input.value = Number(field.value || 0).toFixed(2);
+        input.min = String(field.min);
+        input.max = String(field.max);
+        input.step = String(field.step);
+        input.value = formatDimensionValue(field.value, field.decimals);
+        row.querySelector(`.dimension-value[data-param-value="${field.key}"]`)?.replaceChildren(
+          document.createTextNode(formatDimensionValue(field.value, field.decimals))
+        );
       }
     });
   }

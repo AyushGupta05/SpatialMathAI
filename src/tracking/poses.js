@@ -255,3 +255,55 @@ export function isPointPose(hand) {
 
   return indexExtended && curledCount >= 3 && thumbRelaxed;
 }
+
+export function isRotatePose(hand) {
+  if (!hand) return false;
+  const scale = palmScale(hand);
+  const wrist = hand[0];
+  const palmCenter = {
+    x: (hand[0].x + hand[5].x + hand[9].x + hand[13].x + hand[17].x) / 5,
+    y: (hand[0].y + hand[5].y + hand[9].y + hand[13].y + hand[17].y) / 5,
+    z: (hand[0].z + hand[5].z + hand[9].z + hand[13].z + hand[17].z) / 5,
+  };
+  const indexTip = hand[8];
+  const indexPip = hand[6];
+  const indexMcp = hand[5];
+  const middleTip = hand[12];
+  const middlePip = hand[10];
+  const middleMcp = hand[9];
+  const ringTip = hand[16];
+  const ringPip = hand[14];
+  const ringMcp = hand[13];
+  const pinkyTip = hand[20];
+  const pinkyPip = hand[18];
+  const pinkyMcp = hand[17];
+  const thumbTip = hand[4];
+  const thumbIp = hand[3];
+  const thumbMcp = hand[2];
+
+  const indexExtended =
+    (lmkDist(indexTip, palmCenter) / scale) > 1.1 &&
+    (lmkDist(indexTip, wrist) / scale) > 1.4 &&
+    lmkDist(indexTip, wrist) > lmkDist(indexPip, wrist) * 1.12 &&
+    indexTip.y < indexPip.y - 0.03 &&
+    indexTip.y < indexMcp.y - 0.06;
+  const middleExtended =
+    (lmkDist(middleTip, palmCenter) / scale) > 1.08 &&
+    (lmkDist(middleTip, wrist) / scale) > 1.35 &&
+    lmkDist(middleTip, wrist) > lmkDist(middlePip, wrist) * 1.1 &&
+    middleTip.y < middlePip.y - 0.025 &&
+    middleTip.y < middleMcp.y - 0.05;
+  const ringCurled =
+    (lmkDist(ringTip, palmCenter) / scale) < 1.02 &&
+    lmkDist(ringTip, wrist) <= Math.max(lmkDist(ringPip, wrist), lmkDist(ringMcp, wrist)) * 1.08;
+  const pinkyCurled =
+    (lmkDist(pinkyTip, palmCenter) / scale) < 1.03 &&
+    lmkDist(pinkyTip, wrist) <= Math.max(lmkDist(pinkyPip, wrist), lmkDist(pinkyMcp, wrist)) * 1.08;
+  const fingerSplitWide = (lmkDist(indexTip, middleTip) / scale) > 0.34;
+  const thumbOpen =
+    (lmkDist(thumbTip, palmCenter) / scale) > 1.02 &&
+    (lmkDist(thumbTip, thumbMcp) / scale) > 0.48 &&
+    lmkDist(thumbTip, wrist) > lmkDist(thumbIp, wrist) * 1.04;
+
+  return indexExtended && middleExtended && ringCurled && pinkyCurled && fingerSplitWide && thumbOpen;
+}
