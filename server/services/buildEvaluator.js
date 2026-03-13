@@ -95,6 +95,50 @@ function findBestMatch(suggestion, sceneObjects, usedIds) {
   return null;
 }
 
+function titlesForSuggestionIds(plan, ids = []) {
+  const byId = new Map((plan?.objectSuggestions || []).map((suggestion) => [suggestion.id, suggestion.title]));
+  return ids.map((id) => byId.get(id) || id);
+}
+
+function suggestionById(plan, suggestionId) {
+  return plan.objectSuggestions.find((suggestion) => suggestion.id === suggestionId) || null;
+}
+
+function defaultActiveStep(plan, stepAssessments) {
+  if (!stepAssessments.length) return null;
+  const firstIncomplete = stepAssessments.find((step) => !step.complete);
+  return firstIncomplete || stepAssessments[stepAssessments.length - 1] || null;
+}
+
+function buildCoachFeedback({ plan, snapshot, activeStep, allRequiredComplete }) {
+  const selectedObject = snapshot.objects.find((objectSpec) => objectSpec.id === snapshot.selectedObjectId) || null;
+  const missingTitles = titlesForSuggestionIds(plan, activeStep?.missingObjectIds || []);
+
+  if (!snapshot.objects.length) {
+    const firstRequired = suggestionById(plan, activeStep?.missingObjectIds?.[0] || activeStep?.requiredObjectIds?.[0]);
+    return firstRequired
+      ? `Start by placing ${firstRequired.title}.`
+      : "Start by placing the main object from the lesson.";
+  }
+
+  if (missingTitles.length) {
+    return `Next, add ${missingTitles.join(" and ")} for ${activeStep?.title || "the active build step"}.`;
+  }
+
+  if (selectedObject && !allRequiredComplete) {
+    return `Good. ${selectedObject.label || selectedObject.shape} is selected, so inspect it and finish the current step.`;
+  }
+
+  if (allRequiredComplete) {
+    if (selectedObject) {
+      return `The scene is ready. Use ${selectedObject.label || selectedObject.shape} to make a prediction before solving.`;
+    }
+    return "The scene is ready. Make a short prediction before asking for the explanation.";
+  }
+
+  return `${activeStep?.title || "This step"} looks complete. Move to the next visible relationship.`;
+}
+
 export function evaluateBuild(planInput, snapshotInput, currentStepId = null) {
   const plan = normalizeScenePlan(planInput);
   const snapshot = normalizeSceneSnapshot(snapshotInput);
@@ -134,10 +178,24 @@ export function evaluateBuild(planInput, snapshotInput, currentStepId = null) {
 
   const requiredObjects = objectAssessments.filter((assessment) => !assessment.optional);
   const matchedRequiredObjects = requiredObjects.filter((assessment) => assessment.present).length;
-  const activeStep = currentStepId
+  const requestedActiveStep = currentStepId
     ? stepAssessments.find((step) => step.stepId === currentStepId) || null
     : null;
   const allRequiredComplete = matchedRequiredObjects >= requiredObjects.length;
+  const activeStep = requestedActiveStep || defaultActiveStep(plan, stepAssessments);
+  const nextRequiredSuggestionIds = activeStep?.missingObjectIds?.length
+    ? activeStep.missingObjectIds
+    : [];
+  const readyForPrediction = Boolean(activeStep?.complete || allRequiredComplete);
+  const matchedSuggestionIds = objectAssessments
+    .filter((assessment) => assessment.present)
+    .map((assessment) => assessment.suggestionId);
+  const coachFeedback = buildCoachFeedback({
+    plan,
+    snapshot,
+    activeStep,
+    allRequiredComplete,
+  });
 
   return {
     summary: {
@@ -145,7 +203,7 @@ export function evaluateBuild(planInput, snapshotInput, currentStepId = null) {
       matchedRequiredObjects,
       totalRequiredObjects: requiredObjects.length,
       completionRatio: requiredObjects.length ? Number((matchedRequiredObjects / requiredObjects.length).toFixed(2)) : 1,
-      currentStepId: currentStepId || null,
+      currentStepId: activeStep?.stepId || currentStepId || null,
     },
     objectAssessments,
     stepAssessments,
@@ -155,6 +213,16 @@ export function evaluateBuild(planInput, snapshotInput, currentStepId = null) {
       reason: allRequiredComplete
         ? "Build complete enough to answer."
         : "Add the required scene objects before answering.",
+    },
+    guidance: {
+      currentStepId: activeStep?.stepId || null,
+      currentStepTitle: activeStep?.title || "",
+      nextRequiredSuggestionIds,
+      readyForPrediction,
+      matchedSuggestionIds,
+      coachFeedback,
+      missingTitles: titlesForSuggestionIds(plan, nextRequiredSuggestionIds),
+      selectedObjectId: snapshot.selectedObjectId || null,
     },
   };
 }

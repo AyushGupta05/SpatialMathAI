@@ -1,21 +1,31 @@
 import { Hono } from "hono";
 import { generateScenePlan } from "../services/planService.js";
+import { extractPlanPayload } from "../services/planRequest.js";
 
-const planRoute = new Hono();
+export function createPlanRoute({ planGenerator = generateScenePlan } = {}) {
+  const planRoute = new Hono();
 
-planRoute.post("/", async (c) => {
-  try {
-    const { question, sceneSnapshot = null, mode = "guided" } = await c.req.json();
-    if (!question || typeof question !== "string") {
-      return c.json({ error: "question is required" }, 400);
+  planRoute.post("/", async (c) => {
+    try {
+      const { questionText, imageAsset, sceneSnapshot = null, mode = "guided" } = await extractPlanPayload(c.req.raw);
+      if (!questionText && !imageAsset) {
+        return c.json({ error: "question text or an uploaded image is required" }, 400);
+      }
+
+      const scenePlan = await planGenerator({
+        questionText,
+        imageAsset,
+        sceneSnapshot,
+        mode,
+      });
+      return c.json({ scenePlan });
+    } catch (error) {
+      console.error("Plan route error:", error);
+      return c.json({ error: error.message || "Internal server error" }, 500);
     }
+  });
 
-    const scenePlan = await generateScenePlan({ question: question.trim(), sceneSnapshot, mode });
-    return c.json({ scenePlan });
-  } catch (error) {
-    console.error("Plan route error:", error);
-    return c.json({ error: error.message || "Internal server error" }, 500);
-  }
-});
+  return planRoute;
+}
 
-export default planRoute;
+export default createPlanRoute();

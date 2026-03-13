@@ -47,7 +47,14 @@ export async function converseNova(modelId, systemPrompt, messages, options = {}
   if (!content || content.length === 0) {
     throw new Error("Empty response from Nova model");
   }
-  return content[0].text;
+  const text = content
+    .map((block) => block?.text || "")
+    .join("")
+    .trim();
+  if (!text) {
+    throw new Error("Nova model returned no text content");
+  }
+  return text;
 }
 
 /**

@@ -21,11 +21,18 @@ let assessmentTimer = null;
 let voiceEnabled = false;
 let activeChallenge = null;
 let liveChallengeState = null;
-let observationState = null;
+let questionImageFile = null;
+let questionImagePreviewUrl = null;
+let lastSceneFeedback = "Nova will react to what you do in the scene.";
 
 let questionInput;
 let questionSubmit;
 let questionStatus;
+let questionImageInput;
+let questionImageMeta;
+let questionImagePreview;
+let questionImageThumb;
+let questionImageClear;
 let scenePlanSection;
 let planSummary;
 let buildSummary;
@@ -33,29 +40,36 @@ let planObjects;
 let addAllBtn;
 let stepByStepBtn;
 let buildManuallyBtn;
-let buildStatusSection;
-let buildCompletionChip;
-let buildProgress;
-let stepStatusNote;
-let buildStepsSection;
-let buildStepsList;
-let buildGoalChip;
-let liveChallengeSection;
-let liveChallengeChip;
-let liveChallengeCard;
-let challengeList;
-let scoreDisplay;
-let chatMessages;
-let chatInput;
-let chatSend;
+let lessonSection;
+let lessonStagePill;
+let lessonHeadline;
+let lessonMessage;
+let lessonGoal;
+let lessonFeedback;
+let predictionPanel;
+let predictionPrompt;
+let predictionInput;
+let predictionSubmit;
+let challengePromptCard;
+let challengePromptText;
 let hintBtn;
 let hintCount;
 let explainBtn;
+let advanceStageBtn;
 let voiceToggle;
+let whyDetails;
+let whyText;
+let transcriptDetails;
+let chatMessages;
+let followUpDetails;
+let chatInput;
+let chatSend;
 let answerSection;
 let answerInput;
 let answerSubmit;
 let answerFeedback;
+let challengeList;
+let scoreDisplay;
 let sceneInfo;
 let sceneValidation;
 let cameraBookmarkList;
@@ -83,10 +97,6 @@ function formatMetricName(metric) {
   return metric === "surfaceArea" ? "surface area" : metric || "metric";
 }
 
-function suggestionTitle(plan, suggestionId) {
-  return plan?.objectSuggestions?.find((suggestion) => suggestion.id === suggestionId)?.title || suggestionId;
-}
-
 function currentStepAssessment(assessment) {
   const step = tutorState.getCurrentStep();
   if (!step || !assessment) return null;
@@ -107,56 +117,11 @@ function selectedObjectContext(snapshot = currentSnapshot()) {
     label: objectSpec.label || objectSpec.shape,
     shape: objectSpec.shape,
     params: objectSpec.params,
-    metrics: {
-      volume: Number(metrics.volume.toFixed(3)),
-      surfaceArea: Number(metrics.surfaceArea.toFixed(3)),
-    },
+    metrics,
   };
 }
 
-function resetLiveChallengeState(plan = activePlan()) {
-  const challenge = plan?.liveChallenge || null;
-  liveChallengeState = challenge
-    ? {
-      planId: plan.problem?.id || null,
-      challengeId: challenge.id,
-      unlocked: false,
-      complete: false,
-      primarySuggestionId: null,
-      primaryObjectId: null,
-      baselineValue: null,
-      targetValue: null,
-      currentValue: null,
-      deltaValue: null,
-      progress: 0,
-      toleranceValue: null,
-    }
-    : null;
-}
-
-function resetObservationState() {
-  observationState = {
-    announcedStepIds: new Set(),
-    lastPlacedObjectId: null,
-    liveUnlocked: false,
-    liveComplete: false,
-    lastProgressBucket: -1,
-  };
-}
-
-function setQuestionStatus(text = "", type = "hidden") {
-  if (!questionStatus) return;
-  questionStatus.textContent = text;
-  questionStatus.className = "question-status";
-  if (!text || type === "hidden") {
-    questionStatus.classList.add("hidden");
-    return;
-  }
-  if (type === "loading") questionStatus.classList.add("is-loading");
-  if (type === "error") questionStatus.classList.add("is-error");
-}
-
-function addChatMessage(role, content) {
+function addTranscriptMessage(role, content) {
   if (!chatMessages) return null;
   chatMessages.querySelector(".chat-welcome")?.remove();
   const message = document.createElement("div");
@@ -167,13 +132,14 @@ function addChatMessage(role, content) {
   return message;
 }
 
-function appendTutorObservation(content) {
-  addChatMessage("tutor", content);
-  tutorState.addMessage("assistant", content);
-}
-
-function clearChat() {
-  if (chatMessages) chatMessages.innerHTML = "";
+function clearTranscript() {
+  if (!chatMessages) return;
+  chatMessages.innerHTML = `
+    <div class="chat-welcome">
+      <p class="chat-welcome-title">Lesson transcript</p>
+      <p class="chat-welcome-text">Tutor replies, hints, and follow-up answers will collect here only when needed.</p>
+    </div>
+  `;
 }
 
 function updateHintCount() {
@@ -214,7 +180,7 @@ function renderSceneInfo() {
   objectCount.textContent = String(count);
 
   if (!plan) {
-    sceneInfo.innerHTML = `<p class="muted-text">Ask a question or choose a practice challenge to generate a guided build.</p>`;
+    sceneInfo.innerHTML = `<p class="muted-text">Create a lesson or choose a practice challenge to generate a 3D scene.</p>`;
     return;
   }
 
@@ -225,30 +191,14 @@ function renderSceneInfo() {
         <span class="formula">V = ${formatNumber(selected.metrics.volume)}, SA = ${formatNumber(selected.metrics.surfaceArea)}</span>
       </p>
     `
-    : `<p class="muted-text" style="margin:8px 0 0">Select or right click a solid to inspect its dimensions and unfold view.</p>`;
+    : `<p class="muted-text" style="margin:8px 0 0">Select an object in the scene to inspect its role and dimensions.</p>`;
 
   sceneInfo.innerHTML = `
-    <p style="margin:0 0 6px"><strong>${plan.problem.question}</strong></p>
+    <p style="margin:0 0 6px"><strong>${plan.sourceSummary.cleanedQuestion || plan.problem.question}</strong></p>
     <p class="muted-text">${count} object${count === 1 ? "" : "s"} currently in the world</p>
-    <p class="muted-text">Formula scaffold: <span class="formula">${plan.answerScaffold.formula || "Ask the tutor to derive it from the current scene."}</span></p>
+    <p class="muted-text">Focus: <span class="formula">${plan.sceneFocus.primaryInsight || plan.sceneFocus.focusPrompt || "Build the scene and inspect the key relationship."}</span></p>
     ${selectionMarkup}
   `;
-}
-
-function renderPlanSummary(plan) {
-  if (!planSummary || !planObjects || !scenePlanSection) return;
-  planSummary.textContent = plan.problem.summary || plan.problem.question;
-  if (buildSummary) {
-    buildSummary.classList.remove("hidden");
-    buildSummary.textContent = plan.overview || "Nova turned the question into a spatial build. Start placing objects or let Nova add the scene.";
-  }
-  planObjects.innerHTML = plan.objectSuggestions.map((suggestion) => `
-    <li>
-      <strong>${suggestion.title}</strong><br />
-      <span class="muted-text">${suggestion.purpose}</span>
-    </li>
-  `).join("");
-  scenePlanSection.classList.remove("hidden");
 }
 
 function renderCameraBookmarks(plan) {
@@ -275,127 +225,33 @@ function renderAnnotations() {
   });
 }
 
+function suggestionTitle(plan, suggestionId) {
+  return plan?.objectSuggestions?.find((suggestion) => suggestion.id === suggestionId)?.title || suggestionId;
+}
+
 function missingSuggestionIds(step, assessment) {
   if (!step || !assessment) return [];
   const byId = new Map(assessment.objectAssessments.map((item) => [item.suggestionId, item]));
   return (step.requiredObjectIds || []).filter((id) => !byId.get(id)?.present);
 }
 
-function addSuggestionsById(suggestionIds) {
-  const plan = activePlan();
-  if (!plan) return;
-  const snapshot = currentSnapshot();
-  const existingShapes = new Set(snapshot.objects.map((objectSpec) => `${objectSpec.shape}:${JSON.stringify(objectSpec.params)}`));
-  const toAdd = plan.objectSuggestions
-    .filter((suggestion) => suggestionIds.includes(suggestion.id))
-    .filter((suggestion) => !existingShapes.has(`${suggestion.object.shape}:${JSON.stringify(suggestion.object.params)}`))
-    .map((suggestion) => suggestion.object);
-  if (!toAdd.length) return;
-  sceneApi.addObjects(toAdd, { reason: "guided-add" });
-  renderAnnotations();
-}
-
-function renderSteps(plan, assessment) {
-  if (!buildStepsList || !buildStepsSection || !plan) return;
-  buildStepsSection.classList.remove("hidden");
-  const currentStep = tutorState.getCurrentStep();
-  buildGoalChip.textContent = currentStep ? currentStep.title : "Ready";
-
-  buildStepsList.innerHTML = plan.buildSteps.map((step, index) => {
-    const stepAssessment = assessment?.stepAssessments?.find((item) => item.stepId === step.id);
-    const active = tutorState.currentStep === index;
-    const complete = Boolean(stepAssessment?.complete);
-    const missing = missingSuggestionIds(step, assessment);
-    const buttonLabel = missing.length
-      ? `Add ${missing.length} suggestion${missing.length === 1 ? "" : "s"}`
-      : step.cameraBookmarkId ? "Focus view" : "Review step";
-    return `
-      <article class="build-step-card${active ? " is-active" : ""}${complete ? " is-complete" : ""}" data-step-id="${step.id}">
-        <div class="build-step-top">
-          <p class="build-step-title">${step.title}</p>
-          <span class="build-step-state">${complete ? "complete" : active ? "active" : "open"}</span>
-        </div>
-        <p class="build-step-instruction">${step.instruction}</p>
-        <p class="build-step-hint">${step.hint || "Ask Nova for a short hint if you need one."}</p>
-        <p class="build-step-feedback ${complete ? "is-good" : "is-warn"}">${stepAssessment?.feedback || "Build this part of the scene to continue."}</p>
-        <div class="build-step-actions">
-          <button type="button" class="step-card-btn" data-step-action="focus" data-step-id="${step.id}">${buttonLabel}</button>
-        </div>
-      </article>
-    `;
-  }).join("");
-}
-
-function renderAssessment(assessment) {
-  if (!sceneValidation) return;
-  if (!assessment) {
-    sceneValidation.innerHTML = `<p class="muted-text">The tutor will evaluate your scene as you build.</p>`;
-    showAnswerSection(false);
-    return;
-  }
-
-  sceneValidation.innerHTML = `
-    <div class="validation-stat"><strong>${assessment.summary.matchedRequiredObjects}/${assessment.summary.totalRequiredObjects}</strong> required objects matched</div>
-    <div class="validation-stat"><strong>${Math.round(assessment.summary.completionRatio * 100)}%</strong> build completion</div>
-    <div class="validation-stat"><strong>${assessment.answerGate.allowed ? "Ready" : "Not ready"}</strong> to answer<br />${assessment.answerGate.reason}</div>
-  `;
-
-  showAnswerSection(Boolean(activeChallenge && assessment.answerGate.allowed));
-}
-
-function renderBuildStatus(plan, assessment) {
-  if (!buildStatusSection || !buildCompletionChip || !buildProgress || !stepStatusNote) return;
-  if (!plan) {
-    buildStatusSection.classList.add("hidden");
-    return;
-  }
-
-  buildStatusSection.classList.remove("hidden");
-
-  if (!assessment) {
-    buildCompletionChip.textContent = `0 / ${plan.objectSuggestions.filter((suggestion) => !suggestion.optional).length}`;
-    buildProgress.innerHTML = `<p class="muted-text">Nova will track exact object matches as soon as the scene starts changing.</p>`;
-    stepStatusNote.textContent = "Place the first required object or let Nova add the suggestions.";
-    return;
-  }
-
-  const percent = Math.round((assessment.summary.completionRatio || 0) * 100);
-  const currentStep = tutorState.getCurrentStep();
-  const stepAssessment = currentStepAssessment(assessment);
-  const missingTitles = missingSuggestionIds(currentStep, assessment).map((id) => suggestionTitle(plan, id));
-
-  buildCompletionChip.textContent = `${assessment.summary.matchedRequiredObjects} / ${assessment.summary.totalRequiredObjects}`;
-  buildProgress.innerHTML = `
-    <div class="validation-stat"><strong>${percent}%</strong> completion</div>
-    <div class="validation-stat"><strong>${assessment.summary.matchedRequiredObjects}</strong> required object${assessment.summary.matchedRequiredObjects === 1 ? "" : "s"} placed</div>
-    <div class="validation-stat"><strong>${stepAssessment?.complete ? "Step clear" : "Step active"}</strong><br />${currentStep?.title || "No active step selected"}</div>
-  `;
-
-  if (!currentStep) {
-    stepStatusNote.textContent = assessment.answerGate.allowed
-      ? "The core build is complete. Manipulate the scene or ask Nova to explain the math."
-      : "Select a build step to continue.";
-    return;
-  }
-
-  stepStatusNote.textContent = stepAssessment?.complete
-    ? `${currentStep.title} is complete. Move to the next step or start exploring the scene.`
-    : missingTitles.length
-      ? `Still needed for ${currentStep.title}: ${missingTitles.join(", ")}.`
-      : `Keep shaping ${currentStep.title}. Nova is watching the scene for the right dimensions.`;
-}
-
-function showStepIndicator() {
-  if (!stepIndicator) return;
-  const total = tutorState.totalSteps;
-  if (!total) {
-    stepIndicator.classList.add("hidden");
-    return;
-  }
-  stepIndicator.classList.remove("hidden");
-  stepLabel.textContent = `Build ${tutorState.currentStep + 1} / ${total}`;
-  stepPrev.disabled = tutorState.currentStep <= 0;
-  stepNext.disabled = tutorState.currentStep >= total - 1;
+function resetLiveChallengeState(plan = activePlan()) {
+  const challenge = plan?.liveChallenge || null;
+  liveChallengeState = challenge
+    ? {
+      planId: plan.problem?.id || null,
+      challengeId: challenge.id,
+      unlocked: false,
+      complete: false,
+      primaryObjectId: null,
+      baselineValue: null,
+      targetValue: null,
+      currentValue: null,
+      deltaValue: null,
+      progress: 0,
+      toleranceValue: null,
+    }
+    : null;
 }
 
 function findPrimaryLiveSuggestion(plan) {
@@ -416,10 +272,10 @@ function findObjectForSuggestion(snapshot, suggestion, assessment = null) {
   return snapshot.objects.find((objectSpec) => {
     const metadata = objectSpec.metadata || {};
     return (
-      objectSpec.id === suggestion.object.id ||
-      metadata.sourceSuggestionId === suggestion.id ||
-      metadata.suggestionId === suggestion.id ||
-      metadata.guidedObjectId === suggestion.object.id
+      objectSpec.id === suggestion.object.id
+      || metadata.sourceSuggestionId === suggestion.id
+      || metadata.suggestionId === suggestion.id
+      || metadata.guidedObjectId === suggestion.object.id
     );
   }) || null;
 }
@@ -434,16 +290,14 @@ function computeLiveChallenge(plan, assessment) {
 
   const snapshot = currentSnapshot();
   const primarySuggestion = findPrimaryLiveSuggestion(plan);
-  const activeObject = liveChallengeState?.primaryObjectId
+  const currentObject = liveChallengeState?.primaryObjectId
     ? sceneApi.getObject(liveChallengeState.primaryObjectId)
     : findObjectForSuggestion(snapshot, primarySuggestion, assessment);
-  const currentObject = activeObject || findObjectForSuggestion(snapshot, primarySuggestion, assessment);
   const currentMetrics = currentObject ? computeGeometry(currentObject.shape, currentObject.params) : null;
   const currentValue = currentMetrics ? currentMetrics[challenge.metric] : null;
 
-  if (!liveChallengeState.unlocked && assessment?.answerGate?.allowed && primarySuggestion && currentObject && Number.isFinite(currentValue)) {
+  if (!liveChallengeState.unlocked && assessment?.answerGate?.allowed && currentObject && Number.isFinite(currentValue)) {
     liveChallengeState.unlocked = true;
-    liveChallengeState.primarySuggestionId = primarySuggestion.id;
     liveChallengeState.primaryObjectId = currentObject.id;
     liveChallengeState.baselineValue = currentValue;
     liveChallengeState.targetValue = currentValue * challenge.multiplier;
@@ -477,140 +331,289 @@ function computeLiveChallenge(plan, assessment) {
   };
 }
 
-function renderLiveChallenge(plan, assessment) {
-  if (!liveChallengeSection || !liveChallengeChip || !liveChallengeCard) return;
-  if (!plan?.liveChallenge) {
-    liveChallengeSection.classList.add("hidden");
+function renderAssessment(assessment) {
+  if (!sceneValidation) return;
+  if (!assessment) {
+    sceneValidation.innerHTML = `<p class="muted-text">Nova will evaluate the scene and guide the next step as you build.</p>`;
+    showAnswerSection(false);
     return;
   }
 
-  liveChallengeSection.classList.remove("hidden");
-  const state = computeLiveChallenge(plan, assessment);
-  const metricName = formatMetricName(plan.liveChallenge.metric);
-
-  if (!state?.unlocked) {
-    liveChallengeChip.textContent = "Locked";
-    liveChallengeCard.innerHTML = `
-      <p class="live-challenge-title">${plan.liveChallenge.title || `Double the ${metricName}`}</p>
-      <p class="live-challenge-prompt">${plan.liveChallenge.prompt || `Complete the build to unlock a live ${metricName} target.`}</p>
-      <div class="live-challenge-progress"><span style="width: 0%"></span></div>
-    `;
-    return;
-  }
-
-  liveChallengeChip.textContent = state.complete ? "Complete" : "Active";
-  const progressPercent = Math.max(0, Math.min(state.progress * 100, 100));
-  const remaining = Number.isFinite(state.deltaValue) ? state.targetValue - state.currentValue : null;
-  liveChallengeCard.innerHTML = `
-    <p class="live-challenge-title">${state.title || `Double the ${metricName}`}</p>
-    <p class="live-challenge-prompt">${state.prompt || `Adjust the scene until the ${metricName} reaches the target.`}</p>
-    <div class="live-challenge-metric">
-      <div class="live-challenge-stat">
-        <span class="live-challenge-stat-label">Current</span>
-        <span class="live-challenge-stat-value">${formatNumber(state.currentValue)}</span>
-      </div>
-      <div class="live-challenge-stat">
-        <span class="live-challenge-stat-label">Target</span>
-        <span class="live-challenge-stat-value">${formatNumber(state.targetValue)}</span>
-      </div>
-      <div class="live-challenge-stat">
-        <span class="live-challenge-stat-label">${state.complete ? "Status" : "Delta"}</span>
-        <span class="live-challenge-stat-value">${state.complete ? "Within tolerance" : formatNumber(remaining)}</span>
-      </div>
-    </div>
-    <div class="live-challenge-progress"><span style="width: ${progressPercent}%"></span></div>
-    <p class="muted-text">${state.complete
-      ? `Target reached. Nova accepts a tolerance of +/-${formatNumber(state.toleranceValue)} ${metricName}.`
-      : `Tolerance: +/-${formatNumber(state.toleranceValue)} ${metricName}. Keep shaping the object until the target is close enough.`}</p>
+  const guidance = assessment.guidance || {};
+  sceneValidation.innerHTML = `
+    <div class="validation-stat"><strong>${assessment.summary.matchedRequiredObjects}/${assessment.summary.totalRequiredObjects}</strong> required objects matched</div>
+    <div class="validation-stat"><strong>${Math.round(assessment.summary.completionRatio * 100)}%</strong> build completion</div>
+    <div class="validation-stat"><strong>${guidance.readyForPrediction ? "Ready" : "Building"}</strong><br />${guidance.coachFeedback}</div>
   `;
+
+  showAnswerSection(Boolean(activeChallenge && assessment.answerGate.allowed));
+}
+
+function renderPlanSummary(plan) {
+  if (!planSummary || !planObjects || !scenePlanSection) return;
+  const givens = plan.sourceSummary.givens?.length
+    ? plan.sourceSummary.givens.map((given) => `<span class="pill subtle">${given}</span>`).join(" ")
+    : "";
+  planSummary.innerHTML = `
+    <p style="margin:0 0 6px"><strong>${plan.sourceSummary.cleanedQuestion || plan.problem.question}</strong></p>
+    <p class="muted-text">${plan.sceneFocus.primaryInsight || plan.sceneFocus.focusPrompt}</p>
+    ${givens ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${givens}</div>` : ""}
+  `;
+
+  if (buildSummary) {
+    buildSummary.classList.remove("hidden");
+    buildSummary.textContent = plan.sceneFocus.judgeSummary || plan.overview || "Build the scene, make a prediction, then check the idea in 3D.";
+  }
+
+  planObjects.innerHTML = plan.objectSuggestions.map((suggestion) => `
+    <li>
+      <strong>${suggestion.title}</strong><br />
+      <span class="muted-text">${suggestion.purpose}</span>
+    </li>
+  `).join("");
+  scenePlanSection.classList.remove("hidden");
+}
+
+function syncStepFromAssessment(plan, assessment) {
+  if (!plan?.buildSteps?.length || !assessment) return;
+  const targetId = assessment.guidance?.currentStepId || assessment.activeStep?.stepId || null;
+  const stepIndex = plan.buildSteps.findIndex((step) => step.id === targetId);
+  if (stepIndex >= 0) {
+    tutorState.goToStep(stepIndex);
+  }
+}
+
+function updateStepIndicator() {
+  if (!stepIndicator || !stepLabel || !stepPrev || !stepNext) return;
+  const plan = activePlan();
+  const total = tutorState.totalSteps;
+  if (!plan || !total) {
+    stepIndicator.classList.add("hidden");
+    return;
+  }
+
+  const stage = tutorState.learningStage;
+  const step = tutorState.getCurrentStep();
+  const focus = step?.title || plan.sceneFocus.concept || "Lesson";
+  stepIndicator.classList.remove("hidden");
+  stepLabel.textContent = `${stage[0].toUpperCase()}${stage.slice(1)} · ${focus}`;
+  stepPrev.disabled = tutorState.currentStep <= 0;
+  stepNext.disabled = tutorState.currentStep >= total - 1;
+}
+
+function stageConfig(plan, assessment) {
+  const stage = tutorState.learningStage;
+  const learningMoment = plan?.learningMoments?.[stage] || {};
+  const step = tutorState.getCurrentStep();
+  const selected = selectedObjectContext();
+  const challenge = computeLiveChallenge(plan, assessment);
+  const guidance = assessment?.guidance || {};
+  const missingTitles = guidance.missingTitles || [];
+
+  const config = {
+    stage,
+    headline: learningMoment.title || "Lesson",
+    message: learningMoment.coachMessage || plan?.sceneFocus?.primaryInsight || "Use the scene to reason step by step.",
+    goal: learningMoment.goal || plan?.sceneFocus?.focusPrompt || "Use the scene to focus on the main idea.",
+    feedback: lastSceneFeedback || guidance.coachFeedback || "Nova is waiting for your next action.",
+    why: learningMoment.whyItMatters || plan?.sceneFocus?.primaryInsight || "",
+    advanceLabel: "Continue",
+    showPrediction: false,
+    challengeText: "",
+    showChallenge: false,
+  };
+
+  if (stage === "orient") {
+    config.headline = plan?.sceneFocus?.concept
+      ? `Focus on ${plan.sceneFocus.concept}`
+      : "Orient";
+    config.message = learningMoment.coachMessage || `Start by naming the main object or relationship in this problem.`;
+    config.goal = plan?.sceneFocus?.focusPrompt || learningMoment.goal;
+    config.feedback = `Question -> spatial setup -> student action -> AI feedback -> insight.`;
+    config.advanceLabel = "Start Build";
+    return config;
+  }
+
+  if (stage === "build") {
+    config.headline = step?.title || learningMoment.title || "Build / Inspect";
+    config.message = missingTitles.length
+      ? `Build the scene a piece at a time. ${missingTitles.join(", ")} still need attention.`
+      : guidance.coachFeedback || learningMoment.coachMessage;
+    config.goal = step?.instruction || learningMoment.goal;
+    config.feedback = guidance.coachFeedback || lastSceneFeedback;
+    config.advanceLabel = guidance.readyForPrediction ? "Move to Prediction" : "Keep Building";
+    return config;
+  }
+
+  if (stage === "predict") {
+    config.headline = learningMoment.title || "Predict";
+    config.message = learningMoment.coachMessage || "Pause before solving and make a short prediction.";
+    config.goal = learningMoment.prompt || tutorState.predictionState.prompt || "Make one short prediction from the scene.";
+    config.feedback = selected
+      ? `Use ${selected.label} to ground your prediction.`
+      : "Pick the object or helper that best shows the idea.";
+    config.showPrediction = true;
+    config.advanceLabel = tutorState.predictionState.submitted ? "Check in Scene" : "Save Prediction";
+    return config;
+  }
+
+  if (stage === "check") {
+    config.headline = learningMoment.title || "Check";
+    config.message = selected
+      ? `Check your prediction by inspecting ${selected.label}.`
+      : learningMoment.coachMessage || "Use the scene to test your prediction.";
+    config.goal = learningMoment.goal || "Rotate, select, or adjust the object that controls the idea.";
+    config.feedback = lastSceneFeedback || guidance.coachFeedback;
+    config.advanceLabel = "Reflect";
+    return config;
+  }
+
+  if (stage === "reflect") {
+    config.headline = learningMoment.title || "Reflect";
+    config.message = learningMoment.insight || plan?.sceneFocus?.primaryInsight || "State the key idea in one short sentence.";
+    config.goal = learningMoment.goal || "Summarize what the scene made clearer.";
+    config.feedback = selected
+      ? `${selected.label} now anchors the explanation with visible dimensions.`
+      : guidance.coachFeedback || "The scene is ready to explain.";
+    config.advanceLabel = "Start Challenge";
+    return config;
+  }
+
+  config.headline = challenge?.title || learningMoment.title || "Challenge";
+  config.message = challenge?.prompt || learningMoment.coachMessage || "Try one short follow-up.";
+  config.goal = challenge?.unlocked
+    ? `Target ${formatMetricName(challenge.metric)}: ${formatNumber(challenge.targetValue)}`
+    : learningMoment.goal || "Use one more scene action to reinforce the idea.";
+  config.feedback = challenge?.unlocked
+    ? challenge.complete
+      ? "Challenge complete. Your scene is within the target tolerance."
+      : `Current ${formatMetricName(challenge.metric)}: ${formatNumber(challenge.currentValue)}`
+    : guidance.coachFeedback || "Finish the build to unlock the challenge.";
+  config.showChallenge = true;
+  config.challengeText = challenge?.prompt || learningMoment.prompt || "";
+  config.advanceLabel = activeChallenge ? "Check Answer" : "Keep Exploring";
+  return config;
+}
+
+function renderLessonCard() {
+  const plan = activePlan();
+  if (!lessonSection || !lessonStagePill || !lessonHeadline || !lessonMessage || !lessonGoal || !lessonFeedback) return;
+
+  if (!plan) {
+    lessonSection.classList.add("hidden");
+    return;
+  }
+
+  lessonSection.classList.remove("hidden");
+  const assessment = tutorState.latestAssessment;
+  const config = stageConfig(plan, assessment);
+  lessonStagePill.textContent = config.stage[0].toUpperCase() + config.stage.slice(1);
+  lessonHeadline.textContent = config.headline;
+  lessonMessage.textContent = config.message;
+  lessonGoal.textContent = config.goal;
+  lessonFeedback.textContent = config.feedback;
+  whyText.textContent = config.why;
+  advanceStageBtn.textContent = config.advanceLabel;
+
+  const predictionPromptText = tutorState.predictionState.prompt || plan.learningMoments.predict.prompt || config.goal;
+  predictionPrompt.textContent = predictionPromptText;
+  predictionInput.value = tutorState.predictionState.response || "";
+  predictionPanel.classList.toggle("hidden", !config.showPrediction);
+
+  challengePromptText.textContent = config.challengeText;
+  challengePromptCard.classList.toggle("hidden", !config.showChallenge || !config.challengeText);
+  transcriptDetails.open = !tutorState.transcriptCollapsed;
+  followUpDetails.open = !tutorState.followUpCollapsed;
 }
 
 function sceneContextPayload(plan, assessment) {
-  const snapshot = currentSnapshot();
-  const selection = selectedObjectContext(snapshot);
-  const challenge = plan?.liveChallenge ? computeLiveChallenge(plan, assessment) : null;
+  const selected = selectedObjectContext();
   return {
-    selection,
-    liveChallenge: challenge
+    selection: selected
       ? {
-        id: challenge.challengeId,
-        title: challenge.title,
-        metric: challenge.metric,
-        unlocked: challenge.unlocked,
-        complete: challenge.complete,
-        currentValue: challenge.currentValue,
-        targetValue: challenge.targetValue,
-        toleranceValue: challenge.toleranceValue,
+        id: selected.id,
+        label: selected.label,
+        shape: selected.shape,
+        params: selected.params,
+        metrics: {
+          volume: Number(selected.metrics.volume.toFixed(3)),
+          surfaceArea: Number(selected.metrics.surfaceArea.toFixed(3)),
+        },
       }
       : null,
+    liveChallenge: plan?.liveChallenge ? computeLiveChallenge(plan, assessment) : null,
+    sceneFocus: plan?.sceneFocus || null,
+    sourceSummary: plan?.sourceSummary || null,
+    guidance: assessment?.guidance || null,
   };
 }
 
-function handleAssessmentObservations(plan, previousAssessment, nextAssessment) {
-  if (!plan || !nextAssessment || !observationState) return;
-
-  const previousMatched = previousAssessment?.summary?.matchedRequiredObjects || 0;
-  const nextMatched = nextAssessment.summary?.matchedRequiredObjects || 0;
-  if (nextMatched > previousMatched) {
-    appendTutorObservation(`Build progress: ${nextMatched}/${nextAssessment.summary.totalRequiredObjects} required objects are now matched.`);
+function setQuestionStatus(text = "", type = "hidden") {
+  if (!questionStatus) return;
+  questionStatus.textContent = text;
+  questionStatus.className = "question-status";
+  if (!text || type === "hidden") {
+    questionStatus.classList.add("hidden");
+    return;
   }
-
-  nextAssessment.stepAssessments.forEach((stepAssessment) => {
-    if (!stepAssessment.complete || observationState.announcedStepIds.has(stepAssessment.stepId)) return;
-    observationState.announcedStepIds.add(stepAssessment.stepId);
-    const nextStep = plan.buildSteps.find((step) => step.id === stepAssessment.stepId);
-    appendTutorObservation(nextStep
-      ? `${nextStep.title} is complete. ${nextStep.hint || "Move on to the next spatial relationship."}`
-      : `${stepAssessment.title} is complete.`);
-  });
+  if (type === "loading") questionStatus.classList.add("is-loading");
+  if (type === "error") questionStatus.classList.add("is-error");
 }
 
-function handleLiveChallengeObservations(plan, assessment) {
-  const state = computeLiveChallenge(plan, assessment);
-  if (!state || !observationState) return;
+function revokeQuestionPreview() {
+  if (questionImagePreviewUrl) {
+    URL.revokeObjectURL(questionImagePreviewUrl);
+    questionImagePreviewUrl = null;
+  }
+}
 
-  if (state.unlocked && !observationState.liveUnlocked) {
-    observationState.liveUnlocked = true;
-    appendTutorObservation(`Live challenge unlocked: reach ${formatNumber(state.targetValue)} ${formatMetricName(state.metric)} by reshaping the main object.`);
+function renderQuestionImageState() {
+  const hasImage = Boolean(questionImageFile);
+  questionImageMeta?.classList.toggle("hidden", !hasImage);
+  questionImagePreview?.classList.toggle("hidden", !hasImage);
+  questionImageClear?.classList.toggle("hidden", !hasImage);
+  if (!hasImage) {
+    questionImageMeta.textContent = "";
+    questionImageThumb.removeAttribute("src");
+    revokeQuestionPreview();
+    return;
   }
 
-  const bucket = Math.floor(Math.max(0, Math.min(state.progress, 1)) * 4);
-  if (state.unlocked && !state.complete && bucket > observationState.lastProgressBucket && bucket > 0) {
-    observationState.lastProgressBucket = bucket;
-    appendTutorObservation(`Challenge progress: you're about ${bucket * 25}% of the way to the ${formatMetricName(state.metric)} target.`);
-  }
-
-  if (state.complete && !observationState.liveComplete) {
-    observationState.liveComplete = true;
-    appendTutorObservation(`Challenge complete. The current ${formatMetricName(state.metric)} is within Nova's tolerance band.`);
-  }
+  questionImageMeta.textContent = `${questionImageFile.name} · ${formatNumber(questionImageFile.size / 1024, 0)} KB`;
+  revokeQuestionPreview();
+  questionImagePreviewUrl = URL.createObjectURL(questionImageFile);
+  questionImageThumb.src = questionImagePreviewUrl;
 }
 
 async function syncAssessment() {
   const plan = activePlan();
   if (!plan) {
     renderAssessment(null);
-    renderBuildStatus(null, null);
-    renderLiveChallenge(null, null);
+    renderSceneInfo();
+    renderLessonCard();
+    updateStepIndicator();
     return;
   }
 
   try {
-    const previousAssessment = tutorState.latestAssessment;
     const { assessment } = await evaluateBuild({
       plan,
       sceneSnapshot: currentSnapshot(),
       currentStepId: tutorState.getCurrentStep()?.id || null,
     });
     tutorState.setAssessment(assessment);
-    renderSteps(plan, assessment);
+    syncStepFromAssessment(plan, assessment);
+
+    if (tutorState.learningStage === "build" && assessment.guidance?.readyForPrediction) {
+      tutorState.setLearningStage("predict");
+      tutorState.resetPrediction(plan.learningMoments.predict.prompt);
+      lastSceneFeedback = "The scene is ready. Make a short prediction before asking for the explanation.";
+    }
+
     renderAssessment(assessment);
-    renderBuildStatus(plan, assessment);
-    renderLiveChallenge(plan, assessment);
     renderSceneInfo();
-    showStepIndicator();
-    handleAssessmentObservations(plan, previousAssessment, assessment);
-    handleLiveChallengeObservations(plan, assessment);
+    renderLessonCard();
+    updateStepIndicator();
   } catch (error) {
     console.error("Assessment sync failed:", error);
   }
@@ -621,7 +624,7 @@ function scheduleAssessment() {
   assessmentTimer = window.setTimeout(() => {
     syncAssessment();
     renderAnnotations();
-  }, 180);
+  }, 160);
 }
 
 function setPlan(plan, options = {}) {
@@ -629,8 +632,9 @@ function setPlan(plan, options = {}) {
   activeChallenge = options.challenge || null;
   tutorState.setPlan(normalizedPlan, { mode: options.mode || normalizedPlan.problem.mode || "guided" });
   tutorState.setPhase("plan_ready");
+  tutorState.setLearningStage("orient");
   resetLiveChallengeState(normalizedPlan);
-  resetObservationState();
+  lastSceneFeedback = normalizedPlan.sceneFocus.judgeSummary || "Nova will react to what you do in the scene.";
 
   if (answerFeedback) {
     answerFeedback.textContent = "";
@@ -642,10 +646,9 @@ function setPlan(plan, options = {}) {
   renderCameraBookmarks(normalizedPlan);
   renderSceneInfo();
   renderAssessment(null);
-  renderBuildStatus(normalizedPlan, null);
-  renderLiveChallenge(normalizedPlan, null);
-  renderSteps(normalizedPlan, null);
-  showStepIndicator();
+  renderLessonCard();
+  updateStepIndicator();
+  clearTranscript();
 
   if (options.clearScene !== false) {
     sceneApi.clearScene();
@@ -653,24 +656,25 @@ function setPlan(plan, options = {}) {
 }
 
 async function handleQuestionSubmit() {
-  const question = questionInput?.value?.trim();
-  if (!question) return;
+  const questionText = questionInput?.value?.trim() || "";
+  if (!questionText && !questionImageFile) return;
 
   tutorState.reset();
   activeChallenge = null;
-  resetObservationState();
   resetLiveChallengeState(null);
   tutorState.setPhase("parsing");
   questionSubmit.disabled = true;
-  setQuestionStatus("Asking Nova Pro for a scene plan...", "loading");
+  setQuestionStatus("Planning a scene-aware lesson with Nova...", "loading");
 
   try {
-    const { scenePlan } = await requestScenePlan({ question, mode: "guided", sceneSnapshot: currentSnapshot() });
+    const { scenePlan } = await requestScenePlan({
+      questionText,
+      imageFile: questionImageFile,
+      mode: "guided",
+      sceneSnapshot: currentSnapshot(),
+    });
     setPlan(scenePlan);
-    clearChat();
-    addChatMessage("system", `Question loaded: "${question}"`);
-    beginGuidedBuild({ announce: false });
-    appendTutorObservation("Nova translated the text into a spatial build. Start with the active step, or open the Scene tab to place the objects manually.");
+    addTranscriptMessage("system", `Lesson created: "${scenePlan.sourceSummary?.cleanedQuestion || questionText || "Uploaded diagram"}"`);
     setQuestionStatus("", "hidden");
   } catch (error) {
     console.error("Plan request failed:", error);
@@ -681,27 +685,30 @@ async function handleQuestionSubmit() {
   }
 }
 
-function beginGuidedBuild(options = {}) {
+function beginGuidedBuild() {
   const plan = activePlan();
   if (!plan) return;
   tutorState.setMode("guided");
   tutorState.setPhase(activeChallenge ? "challenge" : "guided_build");
+  tutorState.setLearningStage("build");
   sceneApi.clearScene();
-  switchToTab(options.tab || "tutor");
-  if (options.announce !== false) {
-    appendTutorObservation("Guided build is ready. Use the active step, or place the required shapes directly in the scene.");
-  }
+  switchToTab("tutor");
+  lastSceneFeedback = "Build the scene one meaningful piece at a time. Nova will watch for the next required object.";
+  renderLessonCard();
   scheduleAssessment();
 }
 
-function addAllSuggestedObjects() {
+function loadDraftScene() {
   const plan = activePlan();
   if (!plan) return;
   tutorState.setMode("guided");
   tutorState.setPhase("explore");
-  sceneApi.loadSnapshot(buildSceneSnapshotFromSuggestions(plan), "add-all");
+  tutorState.setLearningStage("predict");
+  tutorState.resetPrediction(plan.learningMoments.predict.prompt);
+  sceneApi.loadSnapshot(buildSceneSnapshotFromSuggestions(plan), "draft-scene");
   renderAnnotations();
-  appendTutorObservation("The full suggested scene is now in the world. Rotate it, resize it, or ask Nova why the measurements matter.");
+  lastSceneFeedback = "Treat this as a draft scene. Inspect it, then make a prediction before asking for the explanation.";
+  renderLessonCard();
   scheduleAssessment();
 }
 
@@ -710,21 +717,28 @@ function beginManualBuild() {
   if (!plan) return;
   tutorState.setMode("manual");
   tutorState.setPhase(activeChallenge ? "challenge" : "manual_build");
+  tutorState.setLearningStage("build");
   sceneApi.clearScene();
   switchToTab("scene");
-  appendTutorObservation("Manual build mode is active. Place the objects yourself, and Nova will count exact guided matches.");
+  lastSceneFeedback = "Manual build mode is active. Use the mouse to place the scene yourself.";
+  renderLessonCard();
   scheduleAssessment();
 }
 
-async function sendTutorMessage(messageText) {
+async function sendTutorMessage(messageText, options = {}) {
   const plan = activePlan();
   if (!plan) return;
   const text = messageText?.trim();
   if (!text) return;
-  addChatMessage("user", text);
+
+  if (options.showUserMessage !== false) {
+    addTranscriptMessage("user", options.userLabel || text);
+  }
   tutorState.addMessage("user", text);
 
-  const typing = addChatMessage("tutor", "...");
+  transcriptDetails.open = true;
+  tutorState.setTranscriptCollapsed(false);
+  const typing = addTranscriptMessage("tutor", "...");
   typing?.classList.add("loading-dots");
 
   try {
@@ -740,14 +754,11 @@ async function sendTutorMessage(messageText) {
         if (typing) {
           typing.textContent = (typing.textContent === "..." ? "" : typing.textContent) + chunk;
         }
-        chatMessages.scrollTop = chatMessages.scrollHeight;
       },
       onAssessment: (assessment) => {
         tutorState.setAssessment(assessment);
         renderAssessment(assessment);
-        renderBuildStatus(plan, assessment);
-        renderSteps(plan, assessment);
-        renderLiveChallenge(plan, assessment);
+        renderLessonCard();
       },
     });
 
@@ -755,13 +766,15 @@ async function sendTutorMessage(messageText) {
       typing.classList.remove("loading-dots");
       typing.textContent = response.text || "I could not generate a tutor reply.";
       tutorState.addMessage("assistant", typing.textContent);
+      lastSceneFeedback = response.text || lastSceneFeedback;
     }
 
     if (response.assessment) {
       tutorState.setAssessment(response.assessment);
-      renderBuildStatus(plan, response.assessment);
-      renderLiveChallenge(plan, response.assessment);
     }
+
+    renderAssessment(tutorState.latestAssessment);
+    renderLessonCard();
 
     if (voiceEnabled && typing?.textContent) {
       speakText(typing.textContent);
@@ -776,20 +789,19 @@ async function sendTutorMessage(messageText) {
 
 async function handleHint() {
   if (!tutorState.useHint()) {
-    addChatMessage("system", "No more hints available.");
+    addTranscriptMessage("system", "No more hints available.");
     return;
   }
   updateHintCount();
-  await sendTutorMessage("Give me one short hint about the next spatial step.");
+  await sendTutorMessage(`Give me one short hint for the ${tutorState.learningStage} stage using the current scene.`, {
+    userLabel: "Need a hint",
+  });
 }
 
 async function handleExplain() {
-  const step = tutorState.getCurrentStep();
-  if (!step) {
-    await sendTutorMessage("Explain how to reason about this scene.");
-    return;
-  }
-  await sendTutorMessage(`Explain this build step: ${step.title}.`);
+  await sendTutorMessage(`Explain the current scene for the ${tutorState.learningStage} stage in two short sentences.`, {
+    userLabel: "Explain the scene",
+  });
 }
 
 async function speakText(text) {
@@ -817,39 +829,52 @@ async function speakText(text) {
   }
 }
 
-function bindStepList() {
-  buildStepsList?.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-step-action]");
-    const card = event.target.closest("[data-step-id]");
-    const stepId = button?.dataset.stepId || card?.dataset.stepId;
-    if (!stepId) return;
+function advanceLessonStage() {
+  const plan = activePlan();
+  const assessment = tutorState.latestAssessment;
+  if (!plan) return;
 
-    const plan = activePlan();
-    const stepIndex = plan?.buildSteps?.findIndex((step) => step.id === stepId) ?? -1;
-    if (stepIndex >= 0) {
-      tutorState.goToStep(stepIndex);
-      showStepIndicator();
-      renderSteps(plan, tutorState.latestAssessment);
-      renderBuildStatus(plan, tutorState.latestAssessment);
-    }
-
-    if (button?.dataset.stepAction === "focus") {
-      const step = plan?.buildSteps?.[stepIndex];
-      if (!step) return;
-      const assessment = tutorState.latestAssessment;
-      const idsToAdd = missingSuggestionIds(step, assessment);
-      if (idsToAdd.length) {
-        addSuggestionsById(idsToAdd);
-        addChatMessage("system", `Added suggestions for ${step.title}.`);
-      } else if (step.cameraBookmarkId) {
-        const bookmark = plan.cameraBookmarks.find((candidate) => candidate.id === step.cameraBookmarkId);
-        if (bookmark) {
-          cameraDirector.animateTo(bookmark.position, bookmark.target, 900);
-        }
+  switch (tutorState.learningStage) {
+    case "orient":
+      beginGuidedBuild();
+      break;
+    case "build":
+      if (assessment?.guidance?.readyForPrediction) {
+        tutorState.setLearningStage("predict");
+        tutorState.resetPrediction(plan.learningMoments.predict.prompt);
+      } else {
+        switchToTab("scene");
       }
-      scheduleAssessment();
-    }
-  });
+      break;
+    case "predict":
+      if (!tutorState.predictionState.submitted) {
+        predictionSubmit.click();
+        return;
+      }
+      tutorState.setLearningStage("check");
+      lastSceneFeedback = "Use the scene to test your prediction.";
+      break;
+    case "check":
+      tutorState.setLearningStage("reflect");
+      break;
+    case "reflect":
+      tutorState.setLearningStage("challenge");
+      break;
+    case "challenge":
+      if (activeChallenge && assessment?.answerGate?.allowed) {
+        answerInput?.focus();
+      } else {
+        sendTutorMessage("Give me one short follow-up challenge based on the current scene.", {
+          userLabel: "Give me a short challenge",
+        });
+      }
+      break;
+    default:
+      break;
+  }
+
+  renderLessonCard();
+  updateStepIndicator();
 }
 
 async function loadChallengesList() {
@@ -871,11 +896,13 @@ async function loadChallengesList() {
         if (!challenge) return;
         activeChallenge = challenge;
         questionInput.value = challenge.question;
+        questionImageFile = null;
+        questionImageInput.value = "";
+        renderQuestionImageState();
         tutorState.startChallenge(challenge.id, challenge.scenePlan);
         setPlan(challenge.scenePlan, { challenge, clearScene: true });
-        clearChat();
-        addChatMessage("system", `Challenge: ${challenge.title}`);
-        appendTutorObservation("Build the scene correctly first. When the required objects are in place, the answer box unlocks.");
+        tutorState.setLearningStage("build");
+        addTranscriptMessage("system", `Practice challenge loaded: ${challenge.title}`);
         beginManualBuild();
       });
     });
@@ -914,17 +941,23 @@ async function handleAnswerSubmit() {
 
 function handleSceneMutation(detail) {
   const plan = activePlan();
-  if (!plan || !detail || detail.type !== "objects" || !observationState) return;
+  if (!plan || !detail || detail.type !== "objects") return;
 
-  renderSceneInfo();
-  renderLiveChallenge(plan, tutorState.latestAssessment);
-  syncUnfoldDrawer();
-
-  if (detail.reason === "place" && detail.object?.id && observationState.lastPlacedObjectId !== detail.object.id) {
-    observationState.lastPlacedObjectId = detail.object.id;
-    appendTutorObservation(`Placed ${detail.object.label || detail.object.shape}. Nova will count it against the current build step.`);
+  if (detail.reason === "place" && detail.object?.label) {
+    lastSceneFeedback = `Placed ${detail.object.label}. Nova is checking how it fits the current goal.`;
+  } else if (detail.reason === "drag-end" && detail.object?.label) {
+    lastSceneFeedback = `Updated ${detail.object.label}. Check whether that changes the focus relationship.`;
+  } else if (detail.object?.label) {
+    lastSceneFeedback = `${detail.object.label} changed. Inspect the scene and compare it with your prediction.`;
   }
 
+  if (tutorState.learningStage === "predict" && tutorState.predictionState.submitted) {
+    tutorState.setLearningStage("check");
+  }
+
+  renderSceneInfo();
+  renderLessonCard();
+  syncUnfoldDrawer();
   scheduleAssessment();
 }
 
@@ -941,6 +974,57 @@ function bindEvents() {
     }
   });
 
+  questionImageInput?.addEventListener("change", () => {
+    const file = questionImageInput.files?.[0] || null;
+    if (file && !["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+      questionImageFile = null;
+      setQuestionStatus("Only PNG, JPEG, and WEBP diagrams are supported.", "error");
+      questionImageInput.value = "";
+      renderQuestionImageState();
+      return;
+    }
+    if (file && file.size > 3.75 * 1024 * 1024) {
+      questionImageFile = null;
+      setQuestionStatus("Uploaded diagram must be 3.75 MB or smaller.", "error");
+      questionImageInput.value = "";
+      renderQuestionImageState();
+      return;
+    }
+    questionImageFile = file;
+    renderQuestionImageState();
+    setQuestionStatus("", "hidden");
+  });
+
+  questionImageClear?.addEventListener("click", () => {
+    questionImageFile = null;
+    questionImageInput.value = "";
+    renderQuestionImageState();
+  });
+
+  addAllBtn?.addEventListener("click", loadDraftScene);
+  stepByStepBtn?.addEventListener("click", beginGuidedBuild);
+  buildManuallyBtn?.addEventListener("click", beginManualBuild);
+  hintBtn?.addEventListener("click", handleHint);
+  explainBtn?.addEventListener("click", handleExplain);
+  advanceStageBtn?.addEventListener("click", advanceLessonStage);
+  predictionSubmit?.addEventListener("click", () => {
+    const response = predictionInput?.value?.trim() || "";
+    tutorState.submitPrediction(response);
+    tutorState.setLearningStage("check");
+    lastSceneFeedback = response
+      ? `Prediction saved: "${response}". Now use the scene to test it.`
+      : "Prediction saved. Now use the scene to test it.";
+    renderLessonCard();
+    updateStepIndicator();
+  });
+
+  voiceToggle?.addEventListener("click", () => {
+    voiceEnabled = !voiceEnabled;
+    voiceToggle.classList.toggle("is-active", voiceEnabled);
+    voiceToggle.setAttribute("aria-pressed", String(voiceEnabled));
+    voiceToggle.textContent = voiceEnabled ? "Voice On" : "Voice";
+  });
+
   chatSend?.addEventListener("click", () => {
     const text = chatInput?.value?.trim();
     if (!text) return;
@@ -954,23 +1038,6 @@ function bindEvents() {
     }
   });
 
-  addAllBtn?.addEventListener("click", addAllSuggestedObjects);
-  stepByStepBtn?.addEventListener("click", () => beginGuidedBuild());
-  buildManuallyBtn?.addEventListener("click", beginManualBuild);
-  hintBtn?.addEventListener("click", handleHint);
-  explainBtn?.addEventListener("click", handleExplain);
-  voiceToggle?.addEventListener("click", () => {
-    voiceEnabled = !voiceEnabled;
-    voiceToggle.classList.toggle("is-active", voiceEnabled);
-    voiceToggle.setAttribute("aria-pressed", String(voiceEnabled));
-    voiceToggle.textContent = voiceEnabled ? "Voice On" : "Voice";
-  });
-
-  document.getElementById("demoBtn")?.addEventListener("click", () => {
-    questionInput.value = "A cylinder has radius 3 and height 10. What is its volume?";
-    handleQuestionSubmit();
-  });
-
   answerSubmit?.addEventListener("click", handleAnswerSubmit);
   answerInput?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
@@ -979,26 +1046,41 @@ function bindEvents() {
     }
   });
 
+  transcriptDetails?.addEventListener("toggle", () => {
+    tutorState.setTranscriptCollapsed(!transcriptDetails.open);
+  });
+  followUpDetails?.addEventListener("toggle", () => {
+    tutorState.setFollowUpCollapsed(!followUpDetails.open);
+  });
+
+  document.getElementById("demoBtn")?.addEventListener("click", async () => {
+    questionInput.value = "A cylinder has radius 3 and height 10. Predict whether doubling the radius or doubling the height changes the volume more.";
+    await handleQuestionSubmit();
+  });
+
   stepPrev?.addEventListener("click", () => {
     tutorState.prevStep();
-    showStepIndicator();
-    renderSteps(activePlan(), tutorState.latestAssessment);
-    renderBuildStatus(activePlan(), tutorState.latestAssessment);
+    updateStepIndicator();
+    renderLessonCard();
+    scheduleAssessment();
   });
   stepNext?.addEventListener("click", () => {
     tutorState.nextStep();
-    showStepIndicator();
-    renderSteps(activePlan(), tutorState.latestAssessment);
-    renderBuildStatus(activePlan(), tutorState.latestAssessment);
+    updateStepIndicator();
+    renderLessonCard();
+    scheduleAssessment();
   });
-
-  bindStepList();
 }
 
 function bindDom() {
   questionInput = document.getElementById("questionInput");
   questionSubmit = document.getElementById("questionSubmit");
   questionStatus = document.getElementById("questionStatus");
+  questionImageInput = document.getElementById("questionImageInput");
+  questionImageMeta = document.getElementById("questionImageMeta");
+  questionImagePreview = document.getElementById("questionImagePreview");
+  questionImageThumb = document.getElementById("questionImageThumb");
+  questionImageClear = document.getElementById("questionImageClear");
   scenePlanSection = document.getElementById("scenePlanSection");
   planSummary = document.getElementById("planSummary");
   buildSummary = document.getElementById("buildSummary");
@@ -1006,29 +1088,36 @@ function bindDom() {
   addAllBtn = document.getElementById("addAllBtn");
   stepByStepBtn = document.getElementById("stepByStepBtn");
   buildManuallyBtn = document.getElementById("buildManuallyBtn");
-  buildStatusSection = document.getElementById("buildStatusSection");
-  buildCompletionChip = document.getElementById("buildCompletionChip");
-  buildProgress = document.getElementById("buildProgress");
-  stepStatusNote = document.getElementById("stepStatusNote");
-  buildStepsSection = document.getElementById("buildStepsSection");
-  buildStepsList = document.getElementById("buildStepsList");
-  buildGoalChip = document.getElementById("buildGoalChip");
-  liveChallengeSection = document.getElementById("liveChallengeSection");
-  liveChallengeChip = document.getElementById("liveChallengeChip");
-  liveChallengeCard = document.getElementById("liveChallengeCard");
-  challengeList = document.getElementById("challengeList");
-  scoreDisplay = document.getElementById("scoreDisplay");
-  chatMessages = document.getElementById("chatMessages");
-  chatInput = document.getElementById("chatInput");
-  chatSend = document.getElementById("chatSend");
+  lessonSection = document.getElementById("lessonSection");
+  lessonStagePill = document.getElementById("lessonStagePill");
+  lessonHeadline = document.getElementById("lessonHeadline");
+  lessonMessage = document.getElementById("lessonMessage");
+  lessonGoal = document.getElementById("lessonGoal");
+  lessonFeedback = document.getElementById("lessonFeedback");
+  predictionPanel = document.getElementById("predictionPanel");
+  predictionPrompt = document.getElementById("predictionPrompt");
+  predictionInput = document.getElementById("predictionInput");
+  predictionSubmit = document.getElementById("predictionSubmit");
+  challengePromptCard = document.getElementById("challengePromptCard");
+  challengePromptText = document.getElementById("challengePromptText");
   hintBtn = document.getElementById("hintBtn");
   hintCount = document.getElementById("hintCount");
   explainBtn = document.getElementById("explainBtn");
+  advanceStageBtn = document.getElementById("advanceStageBtn");
   voiceToggle = document.getElementById("voiceToggle");
+  whyDetails = document.getElementById("whyDetails");
+  whyText = document.getElementById("whyText");
+  transcriptDetails = document.getElementById("transcriptDetails");
+  chatMessages = document.getElementById("chatMessages");
+  followUpDetails = document.getElementById("followUpDetails");
+  chatInput = document.getElementById("chatInput");
+  chatSend = document.getElementById("chatSend");
   answerSection = document.getElementById("answerSection");
   answerInput = document.getElementById("answerInput");
   answerSubmit = document.getElementById("answerSubmit");
   answerFeedback = document.getElementById("answerFeedback");
+  challengeList = document.getElementById("challengeList");
+  scoreDisplay = document.getElementById("scoreDisplay");
   sceneInfo = document.getElementById("sceneInfo");
   sceneValidation = document.getElementById("sceneValidation");
   cameraBookmarkList = document.getElementById("cameraBookmarkList");
@@ -1053,13 +1142,12 @@ export function initTutorController(context) {
   bindDom();
   bindEvents();
   initUnfoldDrawer(context);
-  resetObservationState();
-  resetLiveChallengeState(null);
   updateHintCount();
+  renderQuestionImageState();
   renderAssessment(null);
-  renderBuildStatus(null, null);
-  renderLiveChallenge(null, null);
   renderSceneInfo();
+  renderLessonCard();
+  updateStepIndicator();
   loadChallengesList();
 
   sceneApi.onSceneEvent((detail) => {
@@ -1069,13 +1157,20 @@ export function initTutorController(context) {
   });
 
   sceneApi.onSelectionChange(() => {
+    const selected = selectedObjectContext();
+    if (selected) {
+      lastSceneFeedback = `Selected ${selected.label}. Use it to inspect the current idea.`;
+      if (tutorState.learningStage === "predict" && tutorState.predictionState.submitted) {
+        tutorState.setLearningStage("check");
+      }
+    }
     renderSceneInfo();
-    renderLiveChallenge(activePlan(), tutorState.latestAssessment);
+    renderLessonCard();
     syncUnfoldDrawer();
   });
 
   if (new URLSearchParams(window.location.search).has("demo")) {
-    questionInput.value = "A cylinder has radius 3 and height 10. What is its volume?";
+    questionInput.value = "A cylinder has radius 3 and height 10. Predict whether doubling the radius or doubling the height changes the volume more.";
     handleQuestionSubmit();
   }
 }

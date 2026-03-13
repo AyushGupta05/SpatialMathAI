@@ -10,6 +10,8 @@ const PHASES = [
   "complete",
 ];
 
+const LEARNING_STAGES = ["orient", "build", "predict", "check", "reflect", "challenge"];
+
 export class TutorState extends EventTarget {
   constructor() {
     super();
@@ -25,6 +27,14 @@ export class TutorState extends EventTarget {
       challengeId: null,
       score: 0,
       streak: 0,
+      learningStage: "orient",
+      predictionState: {
+        prompt: "",
+        response: "",
+        submitted: false,
+      },
+      transcriptCollapsed: true,
+      followUpCollapsed: true,
       error: null,
     };
   }
@@ -40,6 +50,10 @@ export class TutorState extends EventTarget {
   get challengeId() { return this._state.challengeId; }
   get score() { return this._state.score; }
   get streak() { return this._state.streak; }
+  get learningStage() { return this._state.learningStage; }
+  get predictionState() { return this._state.predictionState; }
+  get transcriptCollapsed() { return this._state.transcriptCollapsed; }
+  get followUpCollapsed() { return this._state.followUpCollapsed; }
   get error() { return this._state.error; }
   get totalSteps() { return this._state.plan?.buildSteps?.length || 0; }
 
@@ -63,6 +77,14 @@ export class TutorState extends EventTarget {
     this._state.currentStep = 0;
     this._state.hintsUsed = 0;
     this._state.latestAssessment = null;
+    this._state.learningStage = "orient";
+    this._state.predictionState = {
+      prompt: plan?.learningMoments?.predict?.prompt || "",
+      response: "",
+      submitted: false,
+    };
+    this._state.transcriptCollapsed = true;
+    this._state.followUpCollapsed = true;
     this._state.error = null;
     this._emit("plan", { plan: this._state.plan });
   }
@@ -75,6 +97,56 @@ export class TutorState extends EventTarget {
   setAssessment(assessment) {
     this._state.latestAssessment = assessment;
     this._emit("assessment", { assessment });
+  }
+
+  setLearningStage(stage) {
+    if (!LEARNING_STAGES.includes(stage)) return;
+    this._state.learningStage = stage;
+    this._emit("learning-stage", { learningStage: stage });
+  }
+
+  setPredictionPrompt(prompt = "") {
+    this._state.predictionState = {
+      ...this._state.predictionState,
+      prompt,
+    };
+    this._emit("prediction", { predictionState: this._state.predictionState });
+  }
+
+  setPredictionResponse(response = "") {
+    this._state.predictionState = {
+      ...this._state.predictionState,
+      response,
+    };
+    this._emit("prediction", { predictionState: this._state.predictionState });
+  }
+
+  submitPrediction(response = this._state.predictionState.response) {
+    this._state.predictionState = {
+      ...this._state.predictionState,
+      response,
+      submitted: true,
+    };
+    this._emit("prediction", { predictionState: this._state.predictionState });
+  }
+
+  resetPrediction(prompt = this._state.predictionState.prompt) {
+    this._state.predictionState = {
+      prompt,
+      response: "",
+      submitted: false,
+    };
+    this._emit("prediction", { predictionState: this._state.predictionState });
+  }
+
+  setTranscriptCollapsed(collapsed) {
+    this._state.transcriptCollapsed = Boolean(collapsed);
+    this._emit("transcript", { transcriptCollapsed: this._state.transcriptCollapsed });
+  }
+
+  setFollowUpCollapsed(collapsed) {
+    this._state.followUpCollapsed = Boolean(collapsed);
+    this._emit("follow-up", { followUpCollapsed: this._state.followUpCollapsed });
   }
 
   startChallenge(challengeId, plan) {
@@ -160,6 +232,14 @@ export class TutorState extends EventTarget {
       challengeId: null,
       score,
       streak,
+      learningStage: "orient",
+      predictionState: {
+        prompt: "",
+        response: "",
+        submitted: false,
+      },
+      transcriptCollapsed: true,
+      followUpCollapsed: true,
       error: null,
     };
     this._emit("reset", {});
@@ -177,3 +257,4 @@ export class TutorState extends EventTarget {
 }
 
 export const tutorState = new TutorState();
+export { LEARNING_STAGES };

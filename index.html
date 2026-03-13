@@ -163,19 +163,28 @@
             <!-- Question Input -->
             <section class="question-section">
               <div class="card-heading">
-                <h2>Ask a Question</h2>
+                <h2>Create a Lesson</h2>
                 <span class="pill subtle">Nova</span>
               </div>
               <div class="question-input-wrap">
                 <textarea
                   id="questionInput"
                   class="question-textarea"
-                  placeholder="Describe a geometry problem...&#10;e.g. &quot;What is the volume of a cylinder with radius 3 and height 7?&quot;"
+                  placeholder="Type or paste a spatial maths question...&#10;e.g. &quot;What happens to the volume of a cylinder with radius 3 and height 7 if the radius doubles?&quot;"
                   rows="3"
                 ></textarea>
+                <div class="question-upload-row">
+                  <label for="questionImageInput" id="questionImageTrigger" class="question-upload-btn">Add Diagram</label>
+                  <input id="questionImageInput" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+                  <div id="questionImageMeta" class="question-image-meta hidden"></div>
+                  <button id="questionImageClear" class="question-upload-clear hidden" type="button">Remove</button>
+                </div>
+                <div id="questionImagePreview" class="question-image-preview hidden">
+                  <img id="questionImageThumb" alt="Uploaded diagram preview" />
+                </div>
                 <button id="questionSubmit" class="question-submit-btn" type="button">
                   <span class="submit-icon">&#10148;</span>
-                  <span>Ask Nova</span>
+                  <span>Build Lesson</span>
                 </button>
               </div>
               <div id="questionStatus" class="question-status hidden"></div>
@@ -184,47 +193,117 @@
             <!-- Scene Plan Panel (initially hidden) -->
             <section id="scenePlanSection" class="scene-plan-section hidden">
               <div class="card-heading">
-                <h2>Suggested Scene</h2>
+                <h2>Lesson Draft</h2>
               </div>
               <div class="scene-plan">
                 <div id="planSummary" class="plan-summary"></div>
                 <div id="buildSummary" class="build-summary hidden"></div>
                 <ul id="planObjects" class="plan-objects"></ul>
                 <div class="plan-actions">
-                  <button id="addAllBtn" class="plan-btn btn-primary">Add All</button>
+                  <button id="addAllBtn" class="plan-btn btn-secondary">Load Draft Scene</button>
                   <button id="stepByStepBtn" class="plan-btn btn-secondary">Start Guided Build</button>
                   <button id="buildManuallyBtn" class="plan-btn btn-ghost">Build Manually</button>
                 </div>
               </div>
             </section>
 
-            <section id="buildStatusSection" class="scene-validation-section hidden">
+            <section id="lessonSection" class="lesson-section hidden">
               <div class="card-heading">
-                <h2>Build Status</h2>
-                <span id="buildCompletionChip" class="pill subtle">0 / 0</span>
+                <h2>Guided Lesson</h2>
+                <span id="lessonStagePill" class="pill subtle">Orient</span>
               </div>
-              <div id="buildProgress" class="scene-validation">
-                <p class="muted-text">Parse a question to begin the guided build.</p>
-              </div>
-              <p id="stepStatusNote" class="muted-text">Nova will track your progress as you build.</p>
-            </section>
+              <article class="lesson-card">
+                <div class="lesson-hero">
+                  <p id="lessonHeadline" class="lesson-headline">The scene-aware tutor will guide the next move here.</p>
+                  <p id="lessonMessage" class="lesson-message">Parse a question to begin the Orient -> Build -> Predict -> Check -> Reflect -> Challenge loop.</p>
+                </div>
 
-            <section id="liveChallengeSection" class="live-challenge-section hidden">
-              <div class="card-heading">
-                <h2>Live Challenge</h2>
-                <span id="liveChallengeChip" class="pill subtle">Locked</span>
-              </div>
-              <div id="liveChallengeCard" class="live-challenge-card">
-                <p class="muted-text">Complete the required build to unlock the live goal.</p>
-              </div>
-            </section>
+                <div class="lesson-grid">
+                  <div class="lesson-block">
+                    <span class="lesson-block-label">Current Goal</span>
+                    <p id="lessonGoal" class="lesson-block-value">Add a question to start.</p>
+                  </div>
+                  <div class="lesson-block">
+                    <span class="lesson-block-label">Scene Feedback</span>
+                    <p id="lessonFeedback" class="lesson-block-value">Nova will react to what you do in the scene.</p>
+                  </div>
+                </div>
 
-            <section id="buildStepsSection" class="build-steps-section hidden">
-              <div class="card-heading">
-                <h2>Guided Build</h2>
-                <span id="buildGoalChip" class="pill subtle">Waiting</span>
-              </div>
-              <div id="buildStepsList" class="build-steps-list"></div>
+                <div id="predictionPanel" class="lesson-panel hidden">
+                  <p class="lesson-panel-label">Prediction</p>
+                  <p id="predictionPrompt" class="lesson-panel-text">Make a short prediction before asking for the explanation.</p>
+                  <div class="prediction-input-wrap">
+                    <input
+                      id="predictionInput"
+                      class="chat-input"
+                      type="text"
+                      placeholder="Type your prediction..."
+                      autocomplete="off"
+                    />
+                    <button id="predictionSubmit" class="answer-submit-btn" type="button">Save</button>
+                  </div>
+                </div>
+
+                <div id="challengePromptCard" class="lesson-panel hidden">
+                  <p class="lesson-panel-label">Challenge</p>
+                  <p id="challengePromptText" class="lesson-panel-text">A short follow-up challenge will appear here.</p>
+                </div>
+
+                <div class="tutor-actions lesson-actions" id="tutorActions">
+                  <button id="hintBtn" class="tutor-action-btn hint-btn" type="button">
+                    <span>Hint</span>
+                    <span id="hintCount" class="hint-count">(3 left)</span>
+                  </button>
+                  <button id="explainBtn" class="tutor-action-btn" type="button">Explain Scene</button>
+                  <button id="advanceStageBtn" class="tutor-action-btn" type="button">Continue</button>
+                  <button id="voiceToggle" class="tutor-action-btn voice-btn" type="button" title="Toggle voice">
+                    <span>Voice</span>
+                  </button>
+                </div>
+
+                <details id="whyDetails" class="lesson-details">
+                  <summary class="lesson-details-toggle">Why this matters</summary>
+                  <p id="whyText" class="lesson-details-body"></p>
+                </details>
+
+                <details id="transcriptDetails" class="lesson-details">
+                  <summary class="lesson-details-toggle">Transcript</summary>
+                  <div id="chatMessages" class="chat-messages transcript-messages">
+                    <div class="chat-welcome">
+                      <p class="chat-welcome-title">Lesson transcript</p>
+                      <p class="chat-welcome-text">Tutor replies, hints, and follow-up answers will collect here only when needed.</p>
+                    </div>
+                  </div>
+                </details>
+
+                <details id="followUpDetails" class="lesson-details">
+                  <summary class="lesson-details-toggle">Ask a follow-up</summary>
+                  <div class="chat-input-wrap lesson-follow-up">
+                    <input
+                      id="chatInput"
+                      class="chat-input"
+                      type="text"
+                      placeholder="Ask about the current scene..."
+                      autocomplete="off"
+                    />
+                    <button id="chatSend" class="chat-send-btn" type="button">&#10148;</button>
+                  </div>
+                </details>
+
+                <div id="answerSection" class="answer-section hidden">
+                  <div class="answer-input-wrap">
+                    <input
+                      id="answerInput"
+                      class="answer-input"
+                      type="number"
+                      step="any"
+                      placeholder="Your answer..."
+                    />
+                    <button id="answerSubmit" class="answer-submit-btn" type="button">Check</button>
+                  </div>
+                  <div id="answerFeedback" class="answer-feedback hidden"></div>
+                </div>
+              </article>
             </section>
 
             <section class="challenge-section" id="challengeSection">
@@ -240,55 +319,6 @@
                   </div>
                 </div>
               </details>
-            </section>
-
-            <!-- Chat Messages -->
-            <section class="chat-section">
-              <div id="chatMessages" class="chat-messages">
-                <div class="chat-welcome">
-                  <p class="chat-welcome-title">Welcome to SpatialMath Nova</p>
-                  <p class="chat-welcome-text">Ask a geometry question to get a suggested scene plan, then build the geometry step by step with the tutor.</p>
-                </div>
-              </div>
-
-              <!-- Tutor Actions -->
-              <div class="tutor-actions" id="tutorActions">
-                <button id="hintBtn" class="tutor-action-btn hint-btn" type="button">
-                  <span>Hint</span>
-                  <span id="hintCount" class="hint-count">(3 left)</span>
-                </button>
-                <button id="explainBtn" class="tutor-action-btn" type="button">Explain Step</button>
-                <button id="voiceToggle" class="tutor-action-btn voice-btn" type="button" title="Toggle voice">
-                  <span>Voice</span>
-                </button>
-              </div>
-
-              <!-- Chat Input -->
-              <div class="chat-input-wrap">
-                <input
-                  id="chatInput"
-                  class="chat-input"
-                  type="text"
-                  placeholder="Ask the tutor..."
-                  autocomplete="off"
-                />
-                <button id="chatSend" class="chat-send-btn" type="button">&#10148;</button>
-              </div>
-
-              <!-- Answer Input for Challenges -->
-              <div id="answerSection" class="answer-section hidden">
-                <div class="answer-input-wrap">
-                  <input
-                    id="answerInput"
-                    class="answer-input"
-                    type="number"
-                    step="any"
-                    placeholder="Your answer..."
-                  />
-                  <button id="answerSubmit" class="answer-submit-btn" type="button">Check</button>
-                </div>
-                <div id="answerFeedback" class="answer-feedback hidden"></div>
-              </div>
             </section>
 
           </div>
@@ -333,6 +363,7 @@
                     <option value="cone">Cone</option>
                     <option value="pyramid">Pyramid</option>
                     <option value="plane">Plane</option>
+                    <option value="pointMarker">Point</option>
                     <option value="line">Line</option>
                   </select>
                 </label>

@@ -2103,6 +2103,8 @@ export function bootstrapApp() {
           { key: "width", label: "W", value: params.width, step: 0.01 },
           { key: "depth", label: "D", value: params.depth, step: 0.01 },
         ];
+      case "pointMarker":
+        return [{ key: "radius", label: "Radius", value: params.radius, step: 0.01 }];
       case "line":
         return [
           { key: "length", label: "Length", value: distanceBetween(params.start, params.end), step: 0.01 },
@@ -2628,6 +2630,7 @@ export function bootstrapApp() {
     if (shape === "cuboid") return { width: size * 1.6, height: size, depth: size * 0.9 };
     if (shape === "pyramid") return { base: size, height: size };
     if (shape === "plane") return { width: size * 2, depth: size * 2 };
+    if (shape === "pointMarker") return { radius: Math.max(0.08, size * 0.08) };
     if (shape === "line") {
       const endpoints = mesh ? lineEndpointsForMesh(mesh) : null;
       return {

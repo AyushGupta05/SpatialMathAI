@@ -3,6 +3,8 @@ import { normalizeSceneObject } from "../scene/schema.js";
 const VALID_QUESTION_TYPES = ["volume", "surface_area", "composite", "spatial", "comparison"];
 const VALID_LIVE_CHALLENGE_METRICS = ["volume", "surfaceArea"];
 const VALID_STEP_ACTIONS = ["add", "verify", "adjust", "observe", "answer"];
+const VALID_INPUT_MODES = ["text", "image", "multimodal"];
+const LESSON_STAGES = ["orient", "build", "predict", "check", "reflect", "challenge"];
 
 function normalizeString(value, fallback = "") {
   return typeof value === "string" ? value : fallback;
@@ -12,20 +14,145 @@ function normalizeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function uniqueStrings(values = []) {
+  return [...new Set(values.map((value) => normalizeString(value).trim()).filter(Boolean))];
+}
+
 function normalizeQuestionType(value) {
   return VALID_QUESTION_TYPES.includes(value) ? value : "spatial";
+}
+
+function normalizeInputMode(value, fallback = "text") {
+  return VALID_INPUT_MODES.includes(value) ? value : fallback;
+}
+
+function normalizeLessonStage(value, fallback = "orient") {
+  return LESSON_STAGES.includes(value) ? value : fallback;
+}
+
+function normalizeSourceSummary(summary = {}, fallbackQuestion = "") {
+  const rawQuestion = normalizeString(summary.rawQuestion, fallbackQuestion);
+  const cleanedQuestion = normalizeString(summary.cleanedQuestion, rawQuestion);
+  const hasImageContent = normalizeString(summary.diagramSummary).length > 0
+    || normalizeArray(summary.labels).length > 0
+    || normalizeArray(summary.relationships).length > 0;
+  const fallbackMode = rawQuestion && hasImageContent ? "multimodal" : rawQuestion ? "text" : "image";
+
+  return {
+    inputMode: normalizeInputMode(summary.inputMode, fallbackMode),
+    rawQuestion,
+    cleanedQuestion: cleanedQuestion || rawQuestion,
+    givens: uniqueStrings(summary.givens),
+    labels: uniqueStrings(summary.labels),
+    relationships: uniqueStrings(summary.relationships),
+    diagramSummary: normalizeString(summary.diagramSummary, ""),
+  };
+}
+
+function normalizeSceneFocus(sceneFocus = {}, question = "") {
+  const concept = normalizeString(sceneFocus.concept, question ? "Spatial relationship" : "");
+  const primaryInsight = normalizeString(
+    sceneFocus.primaryInsight,
+    concept ? `Use the scene to make ${concept.toLowerCase()} visible before solving.` : ""
+  );
+
+  return {
+    concept,
+    primaryInsight,
+    focusPrompt: normalizeString(sceneFocus.focusPrompt, primaryInsight),
+    judgeSummary: normalizeString(
+      sceneFocus.judgeSummary,
+      "The student acts on the scene, and Nova responds to that action."
+    ),
+  };
+}
+
+function normalizeLearningMoment(moment = {}, stage, defaults = {}) {
+  return {
+    stage: normalizeLessonStage(moment.stage, stage),
+    title: normalizeString(moment.title, defaults.title || stage),
+    coachMessage: normalizeString(moment.coachMessage, defaults.coachMessage || ""),
+    goal: normalizeString(moment.goal, defaults.goal || ""),
+    prompt: normalizeString(moment.prompt, defaults.prompt || ""),
+    insight: normalizeString(moment.insight, defaults.insight || ""),
+    whyItMatters: normalizeString(moment.whyItMatters, defaults.whyItMatters || ""),
+  };
+}
+
+function defaultLearningMoments({ question = "", answerScaffold = {}, sceneFocus = {}, buildSteps = [], liveChallenge = null }) {
+  const currentBuildStep = buildSteps[0] || null;
+  const formula = normalizeString(answerScaffold.formula, "");
+  const concept = sceneFocus.concept || question || "the key spatial idea";
+  const insight = sceneFocus.primaryInsight || `Use the scene to make ${concept.toLowerCase()} easier to see.`;
+
+  return {
+    orient: normalizeLearningMoment({}, "orient", {
+      title: "Orient",
+      coachMessage: `Start by spotting the main object or relationship in the problem.`,
+      goal: sceneFocus.focusPrompt || `Focus on ${concept.toLowerCase()}.`,
+      whyItMatters: insight,
+    }),
+    build: normalizeLearningMoment({}, "build", {
+      title: "Build / Inspect",
+      coachMessage: currentBuildStep?.instruction || "Build the scene one meaningful piece at a time.",
+      goal: currentBuildStep?.title || "Place the main object and the key helper objects.",
+      whyItMatters: "Building the scene makes the hidden structure visible before calculation.",
+    }),
+    predict: normalizeLearningMoment({}, "predict", {
+      title: "Predict",
+      coachMessage: "Pause before solving and make a short prediction from the scene.",
+      goal: "Name the measurement, relationship, or change you expect to matter most.",
+      prompt: buildPredictionPrompt({ sceneFocus, answerScaffold, liveChallenge }),
+      whyItMatters: "Prediction turns the scene into reasoning practice instead of passive watching.",
+    }),
+    check: normalizeLearningMoment({}, "check", {
+      title: "Check",
+      coachMessage: "Manipulate or inspect the scene to test your prediction.",
+      goal: "Rotate, select, or adjust the scene and look for evidence.",
+      whyItMatters: "Checking ties the abstract rule back to something you can see.",
+    }),
+    reflect: normalizeLearningMoment({}, "reflect", {
+      title: "Reflect",
+      coachMessage: "Capture the main idea in one sentence.",
+      goal: formula ? `Connect what you saw to ${formula}.` : "Summarize the key spatial insight.",
+      insight,
+      whyItMatters: "A short reflection helps the concept stick after the interaction.",
+    }),
+    challenge: normalizeLearningMoment({}, "challenge", {
+      title: "Challenge",
+      coachMessage: liveChallenge?.prompt || "Try one small follow-up to reinforce the same idea.",
+      goal: liveChallenge?.title || "Apply the same spatial idea in one more move.",
+      prompt: liveChallenge?.prompt || "Change one parameter and predict what happens next.",
+      whyItMatters: "A short challenge shows whether the understanding transfers.",
+    }),
+  };
 }
 
 function normalizeObjectSuggestion(suggestion = {}, index = 0) {
   const object = normalizeSceneObject(suggestion.object || suggestion.sceneObject || suggestion);
   const id = suggestion.id || object.id || `suggestion-${index + 1}`;
+  const roles = uniqueStrings([
+    ...(normalizeArray(suggestion.roles)),
+    ...(normalizeArray(suggestion.semanticRoles)),
+    ...(normalizeArray(object.metadata?.roles)),
+    normalizeString(suggestion.role),
+    normalizeString(object.metadata?.role),
+  ]);
+
   object.id = object.id || `${id}-object`;
+  object.metadata = {
+    ...(object.metadata || {}),
+    role: normalizeString(object.metadata?.role || roles[0], object.metadata?.role || ""),
+    roles,
+  };
+
   return {
     id,
     title: normalizeString(suggestion.title, object.label || `${object.shape} ${index + 1}`),
     purpose: normalizeString(suggestion.purpose, `Use this ${object.shape} to reason about the problem.`),
     optional: Boolean(suggestion.optional),
-    tags: normalizeArray(suggestion.tags).map((tag) => normalizeString(tag)).filter(Boolean),
+    tags: uniqueStrings(suggestion.tags),
+    roles,
     object,
   };
 }
@@ -66,6 +193,8 @@ function normalizeBuildStep(step = {}, index = 0, suggestions = []) {
     instruction: normalizeString(step.instruction, step.text || ""),
     hint: normalizeString(step.hint, ""),
     action,
+    focusConcept: normalizeString(step.focusConcept, ""),
+    coachPrompt: normalizeString(step.coachPrompt, ""),
     suggestedObjectIds,
     requiredObjectIds: requiredObjectIds.length ? requiredObjectIds : suggestedObjectIds,
     cameraBookmarkId: normalizeString(step.cameraBookmarkId, ""),
@@ -113,6 +242,19 @@ function normalizeLiveChallenge(liveChallenge = {}) {
   };
 }
 
+function buildPredictionPrompt({ sceneFocus = {}, answerScaffold = {}, liveChallenge = null }) {
+  if (liveChallenge?.prompt) {
+    return liveChallenge.prompt;
+  }
+  if (sceneFocus.primaryInsight) {
+    return `Before solving, what do you expect to notice about ${sceneFocus.primaryInsight.toLowerCase()}?`;
+  }
+  if (answerScaffold.formula) {
+    return `Which visible value in the scene belongs in ${answerScaffold.formula} first?`;
+  }
+  return "Before solving, what do you think matters most in the scene?";
+}
+
 export function normalizeScenePlan(plan = {}) {
   const objectSuggestions = normalizeArray(plan.objectSuggestions || plan.objects)
     .map((suggestion, index) => normalizeObjectSuggestion(suggestion, index));
@@ -127,20 +269,38 @@ export function normalizeScenePlan(plan = {}) {
   const challengePrompts = normalizeArray(plan.challengePrompts)
     .map((prompt, index) => normalizeChallengePrompt(prompt, index));
   const liveChallenge = normalizeLiveChallenge(plan.liveChallenge);
+  const question = normalizeString(plan.problem?.question || plan.question, "");
+  const answerScaffold = normalizeAnswerScaffold(plan.answerScaffold || plan.answer || {});
+  const sourceSummary = normalizeSourceSummary(plan.sourceSummary, question);
+  const sceneFocus = normalizeSceneFocus(plan.sceneFocus, sourceSummary.cleanedQuestion || question);
+  const fallbackMoments = defaultLearningMoments({
+    question: sourceSummary.cleanedQuestion || question,
+    answerScaffold,
+    sceneFocus,
+    buildSteps,
+    liveChallenge,
+  });
+  const learningMoments = Object.fromEntries(LESSON_STAGES.map((stage) => [
+    stage,
+    normalizeLearningMoment(plan.learningMoments?.[stage] || {}, stage, fallbackMoments[stage]),
+  ]));
 
   return {
     problem: {
       id: plan.problem?.id || plan.id || "scene-plan",
-      question: normalizeString(plan.problem?.question || plan.question, ""),
+      question,
       questionType: normalizeQuestionType(plan.problem?.questionType || plan.questionType),
-      summary: normalizeString(plan.problem?.summary || plan.summary || plan.question, ""),
+      summary: normalizeString(plan.problem?.summary || plan.summary || question, ""),
       mode: normalizeString(plan.problem?.mode || plan.mode, "guided"),
     },
     overview: normalizeString(plan.overview, ""),
+    sourceSummary,
+    sceneFocus,
+    learningMoments,
     objectSuggestions,
     buildSteps,
     cameraBookmarks,
-    answerScaffold: normalizeAnswerScaffold(plan.answerScaffold || plan.answer || {}),
+    answerScaffold,
     challengePrompts,
     liveChallenge,
   };
@@ -151,12 +311,14 @@ export function sceneSpecToPlan(sceneSpec = {}, options = {}) {
     id: objectSpec.id || `suggestion-${index + 1}`,
     title: objectSpec.id ? `${objectSpec.id}: ${objectSpec.shape}` : objectSpec.shape,
     purpose: objectSpec.highlight ? "Important object for the explanation." : "Use this object in the scene.",
+    roles: objectSpec.highlight ? ["primary"] : [],
     object: objectSpec,
   }, index));
   const dimensionSuggestions = normalizeArray(sceneSpec.dimensions).map((dimension, index) => normalizeObjectSuggestion({
     id: `dimension-${index + 1}`,
     title: dimension.label || `Measurement ${index + 1}`,
     purpose: "Use this helper to show the measurement in the 3D scene.",
+    roles: ["measurement"],
     object: {
       id: `dimension-line-${index + 1}`,
       label: dimension.label || `d${index + 1}`,
@@ -169,7 +331,7 @@ export function sceneSpecToPlan(sceneSpec = {}, options = {}) {
         end: dimension.to || [1, 0, 0],
         thickness: 0.08,
       },
-      metadata: { role: "helper", kind: "dimension" },
+      metadata: { role: "measurement", roles: ["measurement", "helper"], kind: "dimension" },
     },
   }, objectSuggestions.length + index));
   const normalizedObjectSuggestions = [...objectSuggestions, ...dimensionSuggestions];
@@ -222,6 +384,21 @@ export function sceneSpecToPlan(sceneSpec = {}, options = {}) {
       mode: options.mode || "guided",
     },
     overview: options.overview || sceneSpec.answer?.formula || "",
+    sourceSummary: {
+      inputMode: "text",
+      rawQuestion: sceneSpec.question || "",
+      cleanedQuestion: sceneSpec.question || "",
+      givens: normalizeArray(sceneSpec.labels).map((label) => label.text).filter(Boolean),
+      labels: normalizeArray(sceneSpec.labels).map((label) => label.attachTo).filter(Boolean),
+      relationships: [],
+      diagramSummary: "",
+    },
+    sceneFocus: {
+      concept: sceneSpec.questionType === "spatial" ? "spatial relationship" : "key dimensions",
+      primaryInsight: options.overview || "Use the scene to connect the visible dimensions to the problem.",
+      focusPrompt: "Focus on the main object and its labeled measurements.",
+      judgeSummary: "The student builds the scene, then explains the visible relationship.",
+    },
     objectSuggestions: normalizedObjectSuggestions,
     buildSteps: answerSteps,
     cameraBookmarks: sceneSpec.camera ? [sceneSpec.camera] : [{ id: "camera-1", label: "Scene", position: [8, 6, 8], target: [0, 0, 0] }],
@@ -265,3 +442,5 @@ export function buildSceneSnapshotFromSuggestions(plan, suggestionIds = []) {
     selectedObjectId: null,
   };
 }
+
+export { LESSON_STAGES };

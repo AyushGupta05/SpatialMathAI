@@ -6,12 +6,30 @@ async function readJsonOrError(response, fallbackMessage) {
   throw new Error(payload.error || fallbackMessage);
 }
 
-export async function requestScenePlan({ question, sceneSnapshot = null, mode = "guided" }) {
-  const response = await fetch(`${API_BASE}/plan`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question, sceneSnapshot, mode }),
-  });
+export async function requestScenePlan({ questionText = "", question = "", imageFile = null, sceneSnapshot = null, mode = "guided" }) {
+  const nextQuestion = String(questionText || question || "");
+  let response;
+
+  if (imageFile) {
+    const formData = new FormData();
+    formData.set("question", nextQuestion);
+    formData.set("mode", mode);
+    if (sceneSnapshot) {
+      formData.set("sceneSnapshot", JSON.stringify(sceneSnapshot));
+    }
+    formData.set("image", imageFile);
+    response = await fetch(`${API_BASE}/plan`, {
+      method: "POST",
+      body: formData,
+    });
+  } else {
+    response = await fetch(`${API_BASE}/plan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ questionText: nextQuestion, sceneSnapshot, mode }),
+    });
+  }
+
   return readJsonOrError(response, "Failed to generate scene plan");
 }
 

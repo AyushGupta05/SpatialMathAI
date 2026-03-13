@@ -42,10 +42,25 @@ export function computeGeometry(shape, params) {
       };
     }
     case "line": {
-      const length = Number(params.length ?? params.l ?? params.size ?? 1);
+      const start = Array.isArray(params.start) ? params.start : [0, 0, 0];
+      const end = Array.isArray(params.end) ? params.end : [Number(params.length ?? params.l ?? params.size ?? 1), 0, 0];
+      const length = Math.hypot(
+        Number(end[0] || 0) - Number(start[0] || 0),
+        Number(end[1] || 0) - Number(start[1] || 0),
+        Number(end[2] || 0) - Number(start[2] || 0)
+      );
       return {
         shape,
         labels: { length },
+        volume: 0,
+        surfaceArea: 0,
+      };
+    }
+    case "pointMarker": {
+      const radius = Number(params.radius ?? 0.08);
+      return {
+        shape,
+        labels: { radius },
         volume: 0,
         surfaceArea: 0,
       };
