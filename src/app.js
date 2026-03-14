@@ -3579,6 +3579,10 @@ export function bootstrapApp() {
         setActiveMesh(null);
       }
     }
+    if (event.key === "z" && (event.ctrlKey || event.metaKey) && !event.shiftKey) {
+      event.preventDefault();
+      undo();
+    }
     if (event.key === "Delete" || event.key === "Backspace") {
       // Delete selected object
       if (activeMesh && placedMeshes.includes(activeMesh)) {
