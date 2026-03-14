@@ -1,3 +1,4 @@
+import { supports2dCompanionShape } from "../ai/representationMode.js";
 import { computeGeometry } from "../core/geometry.js";
 import { distanceBetween } from "../scene/schema.js";
 
@@ -10,7 +11,13 @@ let formulaEl;
 let breakdownEl;
 let netEl;
 let closeBtn;
-let activeObjectId = null;
+let manualObjectId = null;
+let representationState = {
+  mode: "3d",
+  companionObjectId: null,
+  title: "",
+  subtitle: "",
+};
 
 function escapeHtml(value) {
   return String(value)
@@ -88,15 +95,15 @@ function formulaForObject(objectSpec) {
     case "cube":
       return `Surface area = 6s^2 = 6(${formatNumber(params.size)}^2)`;
     case "cuboid":
-      return `Surface area = 2(wh + wd + hd)`;
+      return "Surface area = 2(wh + wd + hd)";
     case "cylinder":
-      return `Surface area = 2pi r^2 + 2pi rh`;
+      return "Surface area = 2pi r^2 + 2pi rh";
     case "cone":
-      return `Surface area = pi r^2 + pi r l`;
+      return "Surface area = pi r^2 + pi r l";
     case "pyramid":
-      return `Surface area = b^2 + 2bl`;
+      return "Surface area = b^2 + 2bl";
     case "sphere":
-      return `Surface area = 4pi r^2`;
+      return "Surface area = 4pi r^2";
     default:
       return "Surface area breakdown unavailable for this helper object.";
   }
@@ -338,13 +345,23 @@ function renderStats(objectSpec) {
   `;
 }
 
-function renderObject(objectSpec) {
-  if (!drawerEl || !objectSpec) return;
-  const metrics = metricsForObject(objectSpec);
-  titleEl.textContent = `${shapeTitle(objectSpec.shape)} Unfold`;
-  subtitleEl.textContent = objectSpec.shape === "sphere"
+function defaultSubtitle(objectSpec, mode = "manual") {
+  if (mode === "2d") {
+    return `Use the flat view of the ${shapeTitle(objectSpec.shape).toLowerCase()} to compare each surface piece directly.`;
+  }
+  if (mode === "split_2d") {
+    return `Keep the 3D solid visible while this net shows how the ${shapeTitle(objectSpec.shape).toLowerCase()}'s surface is assembled.`;
+  }
+  return objectSpec.shape === "sphere"
     ? "Surface area stays available even though a sphere cannot unfold into a true flat net."
     : `Inspect how Nova breaks the ${shapeTitle(objectSpec.shape).toLowerCase()}'s surface into 2D parts.`;
+}
+
+function renderObject(objectSpec, options = {}) {
+  if (!drawerEl || !objectSpec) return;
+  const metrics = metricsForObject(objectSpec);
+  titleEl.textContent = options.title || `${shapeTitle(objectSpec.shape)} Unfold`;
+  subtitleEl.textContent = options.subtitle || defaultSubtitle(objectSpec, options.mode || "manual");
   statsEl.innerHTML = renderStats(objectSpec);
   formulaEl.textContent = `${formulaForObject(objectSpec)}  =>  ${formatNumber(metrics.surfaceArea)}`;
   breakdownEl.innerHTML = breakdownForObject(objectSpec)
@@ -353,20 +370,135 @@ function renderObject(objectSpec) {
   netEl.innerHTML = renderNet(objectSpec);
 }
 
-function openDrawer(objectId) {
-  if (!sceneApi || !objectId) return;
-  const objectSpec = sceneApi.getObject(objectId);
-  if (!objectSpec) return;
-  activeObjectId = objectId;
+function renderEmptyCompanion(options = {}) {
   drawerEl.classList.remove("hidden");
   drawerEl.setAttribute("aria-hidden", "false");
-  renderObject(objectSpec);
+  drawerEl.dataset.representationMode = options.mode || "split_2d";
+  closeBtn?.classList.add("hidden");
+  titleEl.textContent = options.title || "2D Companion";
+  subtitleEl.textContent = options.subtitle || "A flat companion will appear when a supported solid is visible.";
+  statsEl.innerHTML = "";
+  formulaEl.textContent = "Add a cube, cuboid, cylinder, cone, pyramid, or sphere to unlock the companion view.";
+  breakdownEl.innerHTML = `<div class="unfold-breakdown-item">${escapeHtml(options.message || "Nova uses the 2D companion for surface-area and net reasoning.")}</div>`;
+  netEl.innerHTML = `<p class="unfold-net-note">No supported solid is visible yet.</p>`;
+}
+
+function hideDrawer() {
+  drawerEl?.classList.add("hidden");
+  drawerEl?.setAttribute("aria-hidden", "true");
+  if (drawerEl?.dataset) {
+    delete drawerEl.dataset.representationMode;
+  }
+}
+
+function currentObject(objectId) {
+  return objectId ? sceneApi?.getObject?.(objectId) || null : null;
+}
+
+function resolveCompanionObjectId(preferredObjectId = null) {
+  const preferred = currentObject(preferredObjectId);
+  if (preferred?.shape && supports2dCompanionShape(preferred.shape)) {
+    return preferred.id;
+  }
+
+  const selectedId = sceneApi?.getSelection?.() || sceneApi?.snapshot?.()?.selectedObjectId || null;
+  const selected = currentObject(selectedId);
+  if (selected?.shape && supports2dCompanionShape(selected.shape)) {
+    return selected.id;
+  }
+
+  const objects = sceneApi?.snapshot?.()?.objects || [];
+  return objects.find((objectSpec) => supports2dCompanionShape(objectSpec.shape))?.id || null;
+}
+
+function showObject(objectId, options = {}) {
+  const objectSpec = currentObject(objectId);
+  if (!objectSpec) {
+    renderEmptyCompanion({
+      mode: options.mode,
+      title: options.title,
+      subtitle: options.subtitle,
+      message: "The scene changed, so the 2D companion is waiting for the next supported solid.",
+    });
+    return;
+  }
+
+  drawerEl.classList.remove("hidden");
+  drawerEl.setAttribute("aria-hidden", "false");
+  drawerEl.dataset.representationMode = options.mode || "manual";
+  closeBtn?.classList.toggle("hidden", options.locked === true);
+  renderObject(objectSpec, options);
+}
+
+function syncDrawerFromState() {
+  if (!drawerEl || !sceneApi) return;
+
+  if (representationState.mode !== "3d") {
+    const companionObjectId = resolveCompanionObjectId(representationState.companionObjectId);
+    if (!companionObjectId) {
+      renderEmptyCompanion({
+        mode: representationState.mode,
+        title: representationState.title || (representationState.mode === "2d" ? "2D Lesson View" : "2D Companion"),
+        subtitle: representationState.subtitle,
+      });
+      return;
+    }
+
+    showObject(companionObjectId, {
+      mode: representationState.mode,
+      locked: true,
+      title: representationState.title || (representationState.mode === "2d" ? "2D Lesson View" : "2D Companion"),
+      subtitle: representationState.subtitle,
+    });
+    return;
+  }
+
+  if (!manualObjectId) {
+    hideDrawer();
+    return;
+  }
+
+  if (!currentObject(manualObjectId)) {
+    manualObjectId = null;
+    hideDrawer();
+    return;
+  }
+
+  showObject(manualObjectId, {
+    mode: "manual",
+    locked: false,
+  });
+}
+
+function openManualDrawer(objectId) {
+  manualObjectId = objectId;
+  syncDrawerFromState();
 }
 
 function closeDrawer() {
-  activeObjectId = null;
-  drawerEl?.classList.add("hidden");
-  drawerEl?.setAttribute("aria-hidden", "true");
+  if (representationState.mode !== "3d") {
+    representationState = {
+      mode: "3d",
+      companionObjectId: null,
+      title: "",
+      subtitle: "",
+    };
+    syncDrawerFromState();
+    return;
+  }
+
+  manualObjectId = null;
+  hideDrawer();
+}
+
+export function setUnfoldRepresentationMode(config = {}) {
+  representationState = {
+    mode: String(config.representationMode || "3d"),
+    companionObjectId: config.companionObjectId || null,
+    title: config.companionTitle || "",
+    subtitle: config.companionReason || config.companionSubtitle || "",
+  };
+  syncDrawerFromState();
 }
 
 export function initUnfoldDrawer(context) {
@@ -381,24 +513,19 @@ export function initUnfoldDrawer(context) {
   closeBtn = document.getElementById("unfoldCloseBtn");
 
   closeBtn?.addEventListener("click", closeDrawer);
-  sceneApi?.onObjectContextMenu?.(({ objectId }) => openDrawer(objectId));
-  sceneApi?.onSceneChange?.(() => {
-    if (!activeObjectId) return;
-    const objectSpec = sceneApi.getObject(activeObjectId);
-    if (!objectSpec) {
-      closeDrawer();
+  sceneApi?.onObjectContextMenu?.(({ objectId }) => {
+    if (representationState.mode !== "3d") {
+      representationState.companionObjectId = objectId;
+      syncDrawerFromState();
       return;
     }
-    renderObject(objectSpec);
+    openManualDrawer(objectId);
+  });
+  sceneApi?.onSceneChange?.(() => {
+    syncDrawerFromState();
   });
 }
 
 export function syncUnfoldDrawer() {
-  if (!activeObjectId || !sceneApi) return;
-  const objectSpec = sceneApi.getObject(activeObjectId);
-  if (!objectSpec) {
-    closeDrawer();
-    return;
-  }
-  renderObject(objectSpec);
+  syncDrawerFromState();
 }

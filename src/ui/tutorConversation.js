@@ -60,10 +60,29 @@ export function buildSuggestedQuestionActions(suggestions = []) {
     }));
 }
 
+function scaffoldTutorReply(text = "") {
+  const normalized = String(text || "").replace(/\r\n?/g, "\n").trim();
+  if (!normalized || /\n\s*[-*]\s+/.test(normalized)) return normalized;
+
+  const sentences = sentenceChunks(normalized);
+  if (sentences.length <= 1) return normalized;
+
+  const lastSentence = sentences[sentences.length - 1];
+  const hasQuestion = /\?\s*$/.test(lastSentence);
+  const intro = sentences[0];
+  const middle = sentences.slice(1, hasQuestion ? -1 : undefined).filter(Boolean);
+
+  return [
+    intro,
+    ...middle.slice(0, 2).map((sentence) => `- ${sentence}`),
+    ...(hasQuestion ? [`Question: ${lastSentence}`] : []),
+  ].join("\n");
+}
+
 export function normalizeTutorReplyText(text = "", options = {}) {
   const normalized = String(text || "").replace(/\r\n?/g, "\n").trim();
   if (!normalized) return "";
-  if (!options.completion) return normalized;
+  if (!options.completion) return scaffoldTutorReply(normalized);
   if (/\n\s*[-*]\s+/.test(normalized)) return normalized;
 
   const headingMatch = normalized.match(/^(\*\*[^*]+\*\*|Correct!?\.?)(?:\s+|$)([\s\S]*)$/i);

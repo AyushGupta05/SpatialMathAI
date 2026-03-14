@@ -14,8 +14,9 @@ import { computeGeometry } from "../core/geometry.js";
 import { initLabelRenderer, renderLabels, addLabel, clearLabels } from "../render/labels.js";
 import { AnalyticOverlayManager } from "../render/analyticOverlayManager.js";
 import { CameraDirector } from "../render/cameraDirector.js";
+import { supports2dCompanionShape } from "../ai/representationMode.js";
 import { tutorState } from "../state/tutorState.js";
-import { initUnfoldDrawer, syncUnfoldDrawer } from "./unfoldDrawer.js";
+import { initUnfoldDrawer, setUnfoldRepresentationMode, syncUnfoldDrawer } from "./unfoldDrawer.js";
 import { MicrophoneCapture } from "./microphoneCapture.js";
 import { PcmAudioPlayer } from "./pcmAudioPlayer.js";
 import { extractPastedQuestionImageFile } from "./questionImage.js";
@@ -48,6 +49,8 @@ let analyticFullSolutionVisible = false;
 let analyticFormulaDismissed = false;
 let similarQuestionRequest = null;
 let lastCompletionPromptKey = null;
+let stageWrapEl = null;
+let currentRepresentationMode = "3d";
 
 let questionSection;
 let questionInput;
@@ -115,6 +118,28 @@ function currentSceneMoment(plan = activePlan()) {
     || plan.sceneMoments[Math.min(tutorState.currentStep, plan.sceneMoments.length - 1)]
     || plan.sceneMoments[0]
     || null;
+}
+
+function firstCompanionObjectId(plan = activePlan()) {
+  return (plan?.objectSuggestions || [])
+    .find((suggestion) => supports2dCompanionShape(suggestion?.object?.shape))
+    ?.object?.id || null;
+}
+
+function defaultRepresentationDirective(plan = activePlan()) {
+  const representationMode = plan?.representationMode || "3d";
+  const companionObjectId = representationMode === "3d" ? null : firstCompanionObjectId(plan);
+  const resolvedMode = companionObjectId ? representationMode : "3d";
+  return {
+    representationMode: resolvedMode,
+    companionObjectId,
+    companionTitle: resolvedMode === "2d" ? "2D Lesson View" : resolvedMode === "split_2d" ? "2D Companion" : "",
+    companionReason: resolvedMode === "2d"
+      ? "A flat view makes the surface relationship easier to compare directly."
+      : resolvedMode === "split_2d"
+        ? "Keep the solid visible while the 2D net shows how each face contributes."
+        : "",
+  };
 }
 
 function isLessonComplete() {
@@ -644,9 +669,13 @@ function buildStageIntroMessage(plan = activePlan(), assessment = tutorState.lat
   if ((learningStage === "orient" || learningStage === "build") && stage) {
     const intro = stage.tutorIntro || stage.goal || "";
     const question = assessment?.guidance?.coachFeedback || lastSceneFeedback || "";
-    return intro
-      ? `${intro} ${question}`.trim()
-      : `Look at the scene. ${question || "What do you notice?"}`;
+    const representationHint = plan?.representationMode !== "3d"
+      ? "Use the 2D companion to compare the surface pieces as you look at the solid."
+      : "";
+    return [intro, question, representationHint]
+      .filter(Boolean)
+      .join(" ")
+      .trim() || "Look at the scene. What do you notice?";
   }
 
   if (learningStage === "predict") {
@@ -972,10 +1001,14 @@ function renderCameraBookmarks(plan = activePlan()) {
 }
 
 function sceneDirectiveForCurrentMoment(plan = activePlan()) {
-  if (!isAnalyticPlan(plan)) return null;
+  const representation = defaultRepresentationDirective(plan);
+  if (!isAnalyticPlan(plan)) {
+    return representation;
+  }
   const moment = currentSceneMoment(plan);
-  if (!moment) return null;
+  if (!moment) return representation;
   return {
+    ...representation,
     stageId: moment.id,
     cameraBookmarkId: moment.cameraBookmarkId || null,
     focusTargets: moment.focusTargets || [],
@@ -983,12 +1016,30 @@ function sceneDirectiveForCurrentMoment(plan = activePlan()) {
     visibleOverlayIds: moment.visibleOverlayIds || [],
     revealFormula: Boolean(moment.revealFormula),
     revealFullSolution: Boolean(moment.revealFullSolution),
+    representationMode: moment.representationMode || representation.representationMode,
   };
+}
+
+function applyRepresentationDirective(sceneDirective = null) {
+  const directive = sceneDirective || defaultRepresentationDirective();
+  currentRepresentationMode = directive.representationMode || "3d";
+  stageWrapEl?.setAttribute("data-representation-mode", currentRepresentationMode);
+  setUnfoldRepresentationMode({
+    representationMode: currentRepresentationMode,
+    companionObjectId: directive.companionObjectId || null,
+    companionTitle: directive.companionTitle || "",
+    companionReason: directive.companionReason || "",
+  });
 }
 
 function applySceneDirective(sceneDirective = null, { forceCamera = false } = {}) {
   const plan = activePlan();
-  if (!isAnalyticPlan(plan) || !sceneDirective) return;
+  if (!sceneDirective) {
+    applyRepresentationDirective(defaultRepresentationDirective(plan));
+    return;
+  }
+  applyRepresentationDirective(sceneDirective);
+  if (!isAnalyticPlan(plan)) return;
 
   const visibleIds = sceneDirective.visibleObjectIds?.length
     ? sceneDirective.visibleObjectIds
@@ -1115,6 +1166,7 @@ function announceCurrentStage(force = false) {
   if (isAnalyticPlan(plan)) {
     applyAnalyticSceneState({ forceCamera: force });
   } else {
+    applyRepresentationDirective(sceneDirectiveForCurrentMoment(plan));
     focusStageTargets(stageFocusTargets(plan), { selectFirst: tutorState.learningStage === "build" });
   }
   addTranscriptMessage("tutor", buildStageIntroMessage(plan), {
@@ -1222,6 +1274,7 @@ function setPlan(plan, options = {}) {
       sceneApi?.loadSnapshot?.(autoSnapshot, "lesson-auto");
     }
   }
+  applyRepresentationDirective(defaultRepresentationDirective(normalizedPlan));
   questionSection?.classList.add("is-compact");
   setQuestionPanelCollapsed(true, { force: true });
   switchToTab("tutor");
@@ -1292,6 +1345,7 @@ function sceneContextPayload(plan, assessment) {
     analyticContext: plan?.analyticContext || null,
     sceneMoment: currentSceneMoment(plan) || null,
     completionState: tutorState.completionState || { complete: false, reason: null },
+    representationMode: currentRepresentationMode,
     formulaVisible: analyticFormulaVisible,
     fullSolutionVisible: analyticFullSolutionVisible,
     lastSceneFeedback,
@@ -1946,6 +2000,7 @@ function bindEvents() {
     analyticOverlayManager?.clear();
     sceneApi?.clearScene?.();
     sceneApi?.clearFocus?.();
+    applyRepresentationDirective({ representationMode: "3d" });
     clearTranscript();
     renderAnalyticPanels(null);
     renderAssessment(null);
@@ -2086,9 +2141,9 @@ export function initTutorController(context) {
   cameraDirector = new CameraDirector(world.camera, world.controls);
   analyticOverlayManager = new AnalyticOverlayManager(world, sceneApi);
 
-  const stageWrap = document.querySelector(".stage-wrap");
-  if (stageWrap) {
-    initLabelRenderer(stageWrap);
+  stageWrapEl = document.querySelector(".stage-wrap");
+  if (stageWrapEl) {
+    initLabelRenderer(stageWrapEl);
   }
 
   bindDom();
@@ -2101,6 +2156,7 @@ export function initTutorController(context) {
   renderSceneInfo();
   updateStageRail();
   renderAnalyticPanels(null);
+  applyRepresentationDirective({ representationMode: "3d" });
   updateComposerState();
   stepIndicator?.classList.add("hidden");
 

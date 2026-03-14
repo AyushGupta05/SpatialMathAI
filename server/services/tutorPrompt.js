@@ -22,7 +22,10 @@ function summarizeSceneContext(sceneContext = {}) {
   const guidance = sceneContext?.guidance
     ? `Guidance: ${sceneContext.guidance.coachFeedback || "n/a"}`
     : "Guidance: none";
-  return `${selection}\n${liveChallenge}\n${sceneFocus}\n${sourceSummary}\n${guidance}`;
+  const representation = sceneContext?.representationMode
+    ? `Representation mode: ${sceneContext.representationMode}`
+    : "Representation mode: 3d";
+  return `${selection}\n${liveChallenge}\n${sceneFocus}\n${sourceSummary}\n${guidance}\n${representation}`;
 }
 
 function summarizeDerivedValues(analytic = {}) {
@@ -91,6 +94,7 @@ Your core philosophy:
 - Ask one focused question at a time. "What do you notice about..." or "What would happen if..."
 - Build intuition before formulas. The scene IS the explanation.
 - Be warm, curious, and brief. Sound like a thoughtful guide, not a textbook.
+- Prefer a simple scaffold: one orienting sentence, up to 2 short bullets when they help, then one explicit question.
 
 Problem: ${normalizedPlan.sourceSummary.cleanedQuestion || normalizedPlan.problem.question}
 Question type: ${normalizedPlan.problem.questionType}
@@ -151,7 +155,10 @@ CASE 3 — WRONG and you cannot figure out where it came from:
   Then guide them step-by-step through the solution, asking them to compute each intermediate value one at a time.
 
 Conversation rules:
-- Keep responses to 1-2 short sentences. One focused thought per reply.
+- Keep responses easy to scan:
+  1. Start with one orienting sentence.
+  2. Optionally add up to 2 bullets for the key visual clues.
+  3. End with exactly one question that nudges the learner to think or look at the scene.
 - ALWAYS end with a question that nudges the learner to think or look at the scene. Examples:
   "What do you notice about how these two shapes compare?"
   "Look at the highlighted edge. What happens to the volume if you stretch it?"
@@ -187,6 +194,9 @@ export function buildFallbackTutorReply({ plan, assessment, sceneContext, userMe
   const liveChallenge = sceneContext?.liveChallenge || null;
   const selected = sceneContext?.selection || null;
   const learningStage = sceneContext?.guidance?.readyForPrediction ? "predict-ready" : "building";
+  const companionHint = normalizedPlan.representationMode !== "3d"
+    ? "Use the 2D companion to compare each face once."
+    : "";
 
   const finalAnswer = normalizedPlan.answerScaffold?.finalAnswer;
   const answerMatch = lowerMessage.match(/(?:is\s+(?:the\s+)?answer\s+|(?:^|\s))(\d+(?:\.\d+)?)/);
@@ -226,10 +236,10 @@ export function buildFallbackTutorReply({ plan, assessment, sceneContext, userMe
 
   if (/(hint|next|stuck|help)/.test(lowerMessage)) {
     if (missingTitles.length) {
-      return `Look at the scene. What's missing? Think about what ${missingTitles.join(" and ")} would add to the picture.`;
+      return `Look at the scene. What's missing? Think about what ${missingTitles.join(" and ")} would add to the picture. ${companionHint}`.trim();
     }
     if (assessment?.guidance?.readyForPrediction) {
-      return "The scene is set. Before I explain anything, what's your gut feeling about the answer?";
+      return `The scene is set. ${companionHint} Before I explain anything, what's your gut feeling about the answer?`.trim();
     }
     if (!assessment?.answerGate?.allowed) {
       return "There's still something to build. Look at the scene - what shape or relationship is missing?";
@@ -241,9 +251,9 @@ export function buildFallbackTutorReply({ plan, assessment, sceneContext, userMe
 
   if (/(why|explain|formula)/.test(lowerMessage)) {
     if (selected) {
-      return `Look at ${selected.label}. Its volume is ${selected.metrics?.volume ?? "unknown"} and surface area is ${selected.metrics?.surfaceArea ?? "unknown"}. What do those numbers tell you about the shape?`;
+      return `Look at ${selected.label}. Its volume is ${selected.metrics?.volume ?? "unknown"} and surface area is ${selected.metrics?.surfaceArea ?? "unknown"}. ${companionHint} What do those numbers tell you about the shape?`.trim();
     }
-    return `Look at the objects in the scene. ${missingTitles.length ? `What would change if you added ${missingTitles.join(", ")}?` : "What relationship do you notice between them?"}`;
+    return `Look at the objects in the scene. ${companionHint} ${missingTitles.length ? `What would change if you added ${missingTitles.join(", ")}?` : "What relationship do you notice between them?"}`.trim();
   }
 
   if (learningStage === "predict-ready") {
@@ -252,7 +262,7 @@ export function buildFallbackTutorReply({ plan, assessment, sceneContext, userMe
 
   if (!assessment?.answerGate?.allowed) {
     return missingTitles.length
-      ? `Look at the scene. What would ${missingTitles.join(" and ")} add to the picture?`
+      ? `Look at the scene. ${companionHint} What would ${missingTitles.join(" and ")} add to the picture?`.trim()
       : "There's more to build. What do you think is missing from the scene?";
   }
 

@@ -1028,6 +1028,21 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 5px; }
 #worldMount canvas { position: absolute; inset: 0; z-index: 2; cursor: grab; filter: saturate(1.08) contrast(1.05); }
 #worldMount canvas:active { cursor: grabbing; }
 #overlay { pointer-events: none; z-index: 4; opacity: 0.92; mix-blend-mode: screen; }
+.stage-wrap[data-representation-mode="split_2d"] .stage,
+.stage-wrap[data-representation-mode="split_2d"] #overlay {
+  right: min(392px, calc(100vw - 24px));
+}
+.stage-wrap[data-representation-mode="2d"] .stage,
+.stage-wrap[data-representation-mode="2d"] #overlay {
+  right: min(492px, calc(100vw - 24px));
+}
+.stage-wrap[data-representation-mode="2d"] #worldMount canvas {
+  opacity: 0.24;
+  filter: saturate(0.72) contrast(0.9);
+}
+.stage-wrap[data-representation-mode="2d"] #overlay {
+  opacity: 0.18;
+}
 #webcam {
   position: absolute; right: 14px; bottom: 12px; z-index: 5;
   pointer-events: none; width: 130px;
@@ -1072,6 +1087,15 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 5px; }
     radial-gradient(circle at top right, rgba(122, 247, 228, 0.1), transparent 36%);
   box-shadow: 0 24px 44px rgba(0, 0, 0, 0.44);
   backdrop-filter: blur(18px);
+}
+.unfold-drawer[data-representation-mode="split_2d"] {
+  width: min(380px, calc(100vw - 32px));
+  border-color: rgba(255, 217, 102, 0.24);
+}
+.unfold-drawer[data-representation-mode="2d"] {
+  width: min(480px, calc(100vw - 32px));
+  border-color: rgba(255, 217, 102, 0.28);
+  box-shadow: 0 24px 52px rgba(0, 0, 0, 0.54);
 }
 .unfold-drawer-head {
   display: flex;
@@ -1650,6 +1674,15 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 5px; }
   .unfold-drawer {
     left: 12px;
     width: auto;
+  }
+  .stage-wrap[data-representation-mode="split_2d"] .stage,
+  .stage-wrap[data-representation-mode="split_2d"] #overlay,
+  .stage-wrap[data-representation-mode="2d"] .stage,
+  .stage-wrap[data-representation-mode="2d"] #overlay {
+    right: 0;
+  }
+  .stage-wrap[data-representation-mode="2d"] #worldMount canvas {
+    opacity: 0.46;
   }
 }
 @media (max-width: 640px) {

@@ -69,3 +69,15 @@ test("normalizeTutorReplyText converts solved replies into a clean heading and b
     "- Notice how the line leans almost parallel to the plane.",
   ].join("\n"));
 });
+
+test("normalizeTutorReplyText scaffolds regular tutor replies into a clear scan-friendly shape", () => {
+  const normalized = normalizeTutorReplyText("Start with the cylinder. The radius controls both the top circle and the wrapped rectangle. Which part of the net uses the radius twice?", {
+    completion: false,
+  });
+
+  assert.equal(normalized, [
+    "Start with the cylinder.",
+    "- The radius controls both the top circle and the wrapped rectangle.",
+    "Question: Which part of the net uses the radius twice?",
+  ].join("\n"));
+});

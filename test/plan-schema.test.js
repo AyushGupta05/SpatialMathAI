@@ -115,6 +115,7 @@ test("normalizeScenePlan preserves lesson metadata and fills defaults", () => {
   assert.deepEqual(plan.sourceEvidence.conflicts, ["Image labels radius as 4, but text says 3."]);
   assert.equal(plan.sceneFocus.concept, "radius vs height");
   assert.equal(plan.experienceMode, "analytic_auto");
+  assert.equal(plan.representationMode, "3d");
   assert.equal(plan.objectSuggestions[0].roles[0], "primary");
   assert.deepEqual(plan.objectSuggestions[0].object.metadata.roles, ["primary", "cylinder"]);
   assert.equal(plan.learningMoments.predict.prompt, "Which visible value is the radius?");
@@ -132,4 +133,38 @@ test("normalizeScenePlan preserves lesson metadata and fills defaults", () => {
   assert.ok(plan.lessonStages[0].suggestedActions.some((action) => action.kind === "preview-required-object"));
   assert.ok(plan.lessonStages[0].suggestedActions.some((action) => action.kind === "explain-stage"));
   assert.ok(plan.lessonStages[0].suggestedActions.some((action) => action.kind === "continue-stage"));
+});
+
+test("normalizeScenePlan infers a 2D companion mode for surface area and full 2D mode for nets", () => {
+  const splitPlan = normalizeScenePlan({
+    problem: {
+      question: "Find the surface area of a cylinder with radius 3 and height 7.",
+      questionType: "surface_area",
+    },
+    objectSuggestions: [{
+      id: "primary-cylinder",
+      object: {
+        id: "cylinder-main",
+        shape: "cylinder",
+        params: { radius: 3, height: 7 },
+      },
+    }],
+  });
+  const flatPlan = normalizeScenePlan({
+    problem: {
+      question: "Draw the net of a cone with radius 4 and height 6.",
+      questionType: "surface_area",
+    },
+    objectSuggestions: [{
+      id: "primary-cone",
+      object: {
+        id: "cone-main",
+        shape: "cone",
+        params: { radius: 4, height: 6 },
+      },
+    }],
+  });
+
+  assert.equal(splitPlan.representationMode, "split_2d");
+  assert.equal(flatPlan.representationMode, "2d");
 });

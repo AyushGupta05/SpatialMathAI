@@ -64,6 +64,7 @@ export function createTutorRoute({
         contextStepId,
         assessment,
         completionState,
+        userMessage,
       });
       const systemPrompt = buildTutorSystemPrompt({
         plan,

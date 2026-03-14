@@ -1,4 +1,8 @@
 import { normalizeSceneObject } from "../scene/schema.js";
+import {
+  inferRepresentationMode,
+  normalizeRepresentationMode,
+} from "./representationMode.js";
 
 const VALID_QUESTION_TYPES = ["volume", "surface_area", "composite", "spatial", "comparison"];
 const VALID_LIVE_CHALLENGE_METRICS = ["volume", "surfaceArea"];
@@ -354,7 +358,23 @@ function normalizeCameraBookmark(bookmark = {}, index = 0) {
   };
 }
 
-function normalizeSceneMoment(moment = {}, index = 0) {
+function inferPlanRepresentationMode(plan = {}, sourceSummary = {}, experienceMode = "builder") {
+  const question = normalizeString(sourceSummary.cleanedQuestion || plan.problem?.question || plan.question, "");
+  const primaryShape = normalizeString(
+    plan.objectSuggestions?.[0]?.object?.shape
+      || plan.objects?.[0]?.shape
+      || "",
+    ""
+  );
+  return inferRepresentationMode({
+    experienceMode,
+    questionType: plan.problem?.questionType || plan.questionType || "spatial",
+    question,
+    primaryShape,
+  });
+}
+
+function normalizeSceneMoment(moment = {}, index = 0, fallbackRepresentationMode = "3d") {
   return {
     id: normalizeString(moment.id, `moment-${index + 1}`),
     title: normalizeString(moment.title, `Step ${index + 1}`),
@@ -366,6 +386,7 @@ function normalizeSceneMoment(moment = {}, index = 0) {
     cameraBookmarkId: normalizeString(moment.cameraBookmarkId, ""),
     revealFormula: Boolean(moment.revealFormula),
     revealFullSolution: Boolean(moment.revealFullSolution),
+    representationMode: normalizeRepresentationMode(moment.representationMode, fallbackRepresentationMode),
   };
 }
 
@@ -543,7 +564,15 @@ export function normalizeScenePlan(plan = {}) {
   const sceneFocus = normalizeSceneFocus(plan.sceneFocus, sourceSummary.cleanedQuestion || question);
   const sourceEvidence = normalizeSourceEvidence(plan.sourceEvidence, sourceSummary);
   const analyticContext = normalizeAnalyticContext(plan.analyticContext);
-  const sceneMoments = normalizeArray(plan.sceneMoments).map((moment, index) => normalizeSceneMoment(moment, index));
+  const representationMode = normalizeRepresentationMode(
+    plan.representationMode,
+    inferPlanRepresentationMode(plan, sourceSummary, experienceMode)
+  );
+  const sceneMoments = normalizeArray(plan.sceneMoments).map((moment, index) => normalizeSceneMoment(
+    moment,
+    index,
+    representationMode,
+  ));
   const sceneOverlays = normalizeArray(plan.sceneOverlays).map((overlay, index) => normalizeSceneOverlay(overlay, index));
   const fallbackMoments = defaultLearningMoments({
     question: sourceSummary.cleanedQuestion || question,
@@ -581,6 +610,7 @@ export function normalizeScenePlan(plan = {}) {
       mode: normalizeString(plan.problem?.mode || plan.mode, "guided"),
     },
     experienceMode,
+    representationMode,
     overview: normalizeString(plan.overview, ""),
     sourceSummary,
     sceneFocus,

@@ -1,4 +1,5 @@
 import { normalizeScenePlan } from "../../src/ai/planSchema.js";
+import { supports2dCompanionShape } from "../../src/ai/representationMode.js";
 
 function suggestionById(plan, suggestionId) {
   return plan.objectSuggestions.find((suggestion) => suggestion.id === suggestionId) || null;
@@ -20,6 +21,47 @@ function currentLessonStage(plan, learningState = {}, contextStepId = null, asse
   return plan.lessonStages.find((stage) => stage.id === explicitId)
     || plan.lessonStages[0]
     || null;
+}
+
+function preferredCompanionObjectId(plan, assessment = null) {
+  const suggestionIds = assessment?.guidance?.nextRequiredSuggestionIds || [];
+  for (const suggestionId of suggestionIds) {
+    const suggestion = suggestionById(plan, suggestionId);
+    if (suggestion?.object?.shape && supports2dCompanionShape(suggestion.object.shape)) {
+      return suggestion.object.id;
+    }
+  }
+
+  return plan.objectSuggestions.find((suggestion) => supports2dCompanionShape(suggestion.object.shape))?.object?.id || null;
+}
+
+function requestedRepresentationMode(plan, userMessage = "") {
+  const lower = String(userMessage || "").toLowerCase();
+  if (!lower) return plan.representationMode || "3d";
+  if (/\b(net|unfold|unfolded|flatten|flat pattern|2d)\b/.test(lower)) {
+    return plan.representationMode === "3d" ? "split_2d" : "2d";
+  }
+  if (/\b(orbit|rotate|spin|3d|perspective)\b/.test(lower)) {
+    return "3d";
+  }
+  return plan.representationMode || "3d";
+}
+
+function representationDirectiveForReply(plan, assessment = null, userMessage = "") {
+  const preferredMode = requestedRepresentationMode(plan, userMessage);
+  const companionObjectId = preferredMode === "3d" ? null : preferredCompanionObjectId(plan, assessment);
+  const representationMode = companionObjectId ? preferredMode : "3d";
+
+  return {
+    representationMode,
+    companionObjectId,
+    companionTitle: representationMode === "2d" ? "2D Lesson View" : representationMode === "split_2d" ? "2D Companion" : "",
+    companionReason: representationMode === "2d"
+      ? "A flat view makes the surface relationship easier to compare face by face."
+      : representationMode === "split_2d"
+        ? "Keep the solid in 3D while the net shows how each visible face contributes."
+        : "",
+  };
 }
 
 function stageActionsForReply(plan, stage, learningState = {}, assessment = null) {
@@ -105,10 +147,12 @@ export function buildTutorResponseMeta({
   contextStepId = null,
   assessment = null,
   completionState = null,
+  userMessage = "",
 }) {
   const plan = normalizeScenePlan(planInput);
   const stage = currentLessonStage(plan, learningState, contextStepId, assessment);
   const sceneMoment = sceneMomentForStage(plan, stage?.id || null, learningState);
+  const representation = representationDirectiveForReply(plan, assessment, userMessage);
   const nextRequiredSuggestionIds = assessment?.guidance?.nextRequiredSuggestionIds || [];
   const focusTargets = plan.experienceMode === "analytic_auto"
     ? (sceneMoment?.focusTargets?.length ? sceneMoment.focusTargets : (stage?.highlightTargets || []))
@@ -141,16 +185,17 @@ export function buildTutorResponseMeta({
     completionState: completionState?.complete
       ? { complete: true, reason: completionState.reason || "correct-answer" }
       : { complete: false, reason: null },
-    sceneDirective: plan.experienceMode === "analytic_auto"
-      ? {
-        stageId: sceneMoment?.id || stage?.id || null,
-        cameraBookmarkId: sceneMoment?.cameraBookmarkId || stage?.cameraBookmarkId || null,
-        focusTargets,
-        visibleObjectIds: sceneMoment?.visibleObjectIds || [],
-        visibleOverlayIds: sceneMoment?.visibleOverlayIds || [],
-        revealFormula: Boolean(sceneMoment?.revealFormula),
-        revealFullSolution: Boolean(sceneMoment?.revealFullSolution),
-      }
-      : null,
+    sceneDirective: {
+      ...representation,
+      stageId: sceneMoment?.id || stage?.id || null,
+      cameraBookmarkId: plan.experienceMode === "analytic_auto"
+        ? sceneMoment?.cameraBookmarkId || stage?.cameraBookmarkId || null
+        : null,
+      focusTargets,
+      visibleObjectIds: plan.experienceMode === "analytic_auto" ? (sceneMoment?.visibleObjectIds || []) : [],
+      visibleOverlayIds: plan.experienceMode === "analytic_auto" ? (sceneMoment?.visibleOverlayIds || []) : [],
+      revealFormula: Boolean(plan.experienceMode === "analytic_auto" && sceneMoment?.revealFormula),
+      revealFullSolution: Boolean(plan.experienceMode === "analytic_auto" && sceneMoment?.revealFullSolution),
+    },
   };
 }
