@@ -25,6 +25,25 @@ function summarizeSceneContext(sceneContext = {}) {
   return `${selection}\n${liveChallenge}\n${sceneFocus}\n${sourceSummary}\n${guidance}`;
 }
 
+function summarizeAnalyticContext(plan = {}, _sceneContext = {}, contextStepId = null, learningState = {}) {
+  if (plan?.experienceMode !== "analytic_auto") return "Analytic context: none";
+  const currentMoment = (plan.sceneMoments || []).find((moment) => moment.id === contextStepId)
+    || plan.sceneMoments?.[learningState?.currentStep || 0]
+    || plan.sceneMoments?.[0]
+    || null;
+  const analytic = plan.analyticContext || {};
+  const steps = (analytic.solutionSteps || [])
+    .map((step) => `${step.title}: ${step.formula || step.explanation}`)
+    .join("\n");
+  return [
+    `Analytic subtype: ${analytic.subtype || "unknown"}`,
+    `Formula card: ${analytic.formulaCard?.formula || "n/a"}`,
+    `Formula explanation: ${analytic.formulaCard?.explanation || "n/a"}`,
+    currentMoment ? `Current scene moment: ${currentMoment.title} -> ${currentMoment.prompt}` : "Current scene moment: none",
+    steps ? `Deterministic solution steps:\n${steps}` : "Deterministic solution steps: none",
+  ].join("\n");
+}
+
 function titlesForSuggestionIds(plan, ids = []) {
   const byId = new Map((plan?.objectSuggestions || []).map((suggestion) => [suggestion.id, suggestion.title]));
   return ids.map((id) => byId.get(id) || id);
@@ -60,6 +79,9 @@ ${summarizeScene(sceneSnapshot) || "The learner has not built anything yet."}
 
 Focused scene context:
 ${summarizeSceneContext(sceneContext)}
+
+Analytic lesson context:
+${summarizeAnalyticContext(normalizedPlan, sceneContext, contextStepId, learningState)}
 
 Build assessment:
 ${JSON.stringify(assessment.summary)}
@@ -104,6 +126,21 @@ export function buildFallbackTutorReply({ plan, assessment, sceneContext, userMe
   const liveChallenge = sceneContext?.liveChallenge || null;
   const selected = sceneContext?.selection || null;
   const learningStage = sceneContext?.guidance?.readyForPrediction ? "predict-ready" : "building";
+
+  if (normalizedPlan.experienceMode === "analytic_auto") {
+    const currentMoment = normalizedPlan.sceneMoments.find((moment) => moment.id === contextStepId)
+      || normalizedPlan.sceneMoments[0]
+      || null;
+    if (/(formula|equation)/.test(lowerMessage)) {
+      return `${normalizedPlan.analyticContext?.formulaCard?.formula || normalizedPlan.answerScaffold.formula || "The formula card is ready."} ${normalizedPlan.analyticContext?.formulaCard?.explanation || ""}`.trim();
+    }
+    if (/(next|highlight|show)/.test(lowerMessage)) {
+      return currentMoment?.goal
+        ? `${currentMoment.goal} Use the highlighted objects, then reveal the next visual step when you're ready.`
+        : "Use the highlighted objects, then reveal the next visual step when you're ready.";
+    }
+    return `${currentMoment?.prompt || normalizedPlan.sceneFocus?.primaryInsight || "Use the scene to explain the idea."} ${normalizedPlan.answerScaffold.formula ? `The key formula here is ${normalizedPlan.answerScaffold.formula}.` : ""}`.trim();
+  }
 
   if (liveChallenge?.unlocked && /(target|challenge|goal)/.test(lowerMessage)) {
     return `The live ${liveChallenge.metric === "surfaceArea" ? "surface area" : "volume"} target is ${liveChallenge.targetValue ?? "not set yet"}. The current value is ${liveChallenge.currentValue ?? "unknown"} and Nova accepts about +/-${liveChallenge.toleranceValue ?? "0"} tolerance.`;

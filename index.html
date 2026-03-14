@@ -58,8 +58,8 @@
           </div>
 
           <details class="advanced-menu">
-            <summary class="tool-btn is-menu" data-tooltip="Studio Mode">
-              <span class="tool-label">Studio Mode</span>
+            <summary class="tool-btn is-menu" data-tooltip="More Controls">
+              <span class="tool-label">More Controls</span>
             </summary>
             <div class="advanced-panel">
               <label class="field">
@@ -163,7 +163,7 @@
               <button id="lessonPanelToggle" class="lesson-panel-toggle" type="button" aria-expanded="true">
                 <div class="lesson-panel-copy">
                   <h2>Start a Lesson</h2>
-                  <p class="section-subtitle">Upload a diagram or type a prompt. The tutor will turn it into a staged 3D lesson.</p>
+                  <p class="section-subtitle">Upload or paste a diagram, or type a prompt. The tutor will turn it into a staged 3D lesson.</p>
                   <p id="lessonPanelSummary" class="question-summary hidden"></p>
                 </div>
                 <span class="lesson-panel-icon" aria-hidden="true">&#9662;</span>
@@ -177,7 +177,7 @@
                     rows="3"
                   ></textarea>
                   <div class="question-upload-row">
-                    <label for="questionImageInput" id="questionImageTrigger" class="question-upload-btn">Add Diagram</label>
+                    <label for="questionImageInput" id="questionImageTrigger" class="question-upload-btn">Add or Paste Image</label>
                     <input id="questionImageInput" type="file" accept="image/png,image/jpeg,image/webp" hidden />
                     <div id="questionImageMeta" class="question-image-meta hidden"></div>
                     <button id="questionImageClear" class="question-upload-clear hidden" type="button">Remove</button>
@@ -205,6 +205,29 @@
                 </div>
                 <p id="stageRailGoal" class="stage-rail-goal">Start a lesson to see the current build goal.</p>
               </div>
+
+              <section id="formulaCard" class="formula-card hidden" aria-live="polite">
+                <div class="formula-card-head">
+                  <div>
+                    <p class="stage-rail-label">Relevant Formula</p>
+                    <h3 id="formulaCardTitle" class="formula-card-title">Formula</h3>
+                  </div>
+                  <button id="formulaCardRevealBtn" class="plan-btn btn-secondary" type="button">Reveal Full Solution</button>
+                </div>
+                <p id="formulaCardEquation" class="formula-card-equation"></p>
+                <p id="formulaCardExplanation" class="formula-card-copy"></p>
+              </section>
+
+              <section id="solutionDrawer" class="solution-drawer hidden" aria-live="polite">
+                <div class="formula-card-head">
+                  <div>
+                    <p class="stage-rail-label">Worked Solution</p>
+                    <h3 id="solutionDrawerTitle" class="formula-card-title">Worked Solution</h3>
+                  </div>
+                  <button id="solutionDrawerClose" class="plan-btn btn-ghost" type="button">Hide</button>
+                </div>
+                <div id="solutionDrawerSteps" class="solution-drawer-steps"></div>
+              </section>
 
               <div id="chatMessages" class="chat-messages tutor-thread">
                 <div class="chat-welcome">
@@ -257,7 +280,7 @@
 
             <section class="scene-validation-section">
               <div class="card-heading">
-                <h2>Build Check</h2>
+                <h2>Lesson Status</h2>
               </div>
               <div id="sceneValidation" class="scene-validation">
                 <p class="muted-text">The tutor will evaluate your scene as you build.</p>

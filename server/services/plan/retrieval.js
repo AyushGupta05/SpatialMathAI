@@ -95,7 +95,15 @@ async function embedText(text) {
 
   try {
     const payload = await invokeModelJson(modelId, {
-      inputText: text,
+      schemaVersion: "nova-multimodal-embed-v1",
+      taskType: "SINGLE_EMBEDDING",
+      singleEmbeddingParams: {
+        embeddingPurpose: "TEXT_RETRIEVAL",
+        text: {
+          truncationMode: "END",
+          value: text,
+        },
+      },
     });
     const embedding = parseEmbeddingResponse(payload);
     if (Array.isArray(embedding) && embedding.length) {

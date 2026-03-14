@@ -1,6 +1,7 @@
 import { normalizeScenePlan } from "../../../src/ai/planSchema.js";
 
 export function mergeGeneratedPlan({ baselinePlan, novaPlan, workingQuestion, mode }) {
+  const preserveAnalytic = baselinePlan?.experienceMode === "analytic_auto";
   return normalizeScenePlan({
     ...baselinePlan,
     ...novaPlan,
@@ -41,6 +42,10 @@ export function mergeGeneratedPlan({ baselinePlan, novaPlan, workingQuestion, mo
       : baselinePlan.challengePrompts,
     liveChallenge: novaPlan.liveChallenge || baselinePlan.liveChallenge || null,
     sourceEvidence: novaPlan.sourceEvidence || baselinePlan.sourceEvidence || null,
+    experienceMode: preserveAnalytic ? baselinePlan.experienceMode : (novaPlan.experienceMode || baselinePlan.experienceMode || "builder"),
+    analyticContext: preserveAnalytic ? baselinePlan.analyticContext : (novaPlan.analyticContext || baselinePlan.analyticContext || null),
+    sceneMoments: preserveAnalytic ? baselinePlan.sceneMoments : (novaPlan.sceneMoments || baselinePlan.sceneMoments || []),
+    sceneOverlays: preserveAnalytic ? baselinePlan.sceneOverlays : (novaPlan.sceneOverlays || baselinePlan.sceneOverlays || []),
     agentTrace: (novaPlan.agentTrace?.length || 0)
       ? novaPlan.agentTrace
       : baselinePlan.agentTrace,

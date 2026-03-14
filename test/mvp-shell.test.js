@@ -12,6 +12,8 @@ test("index.html keeps the chat-first tutor shell and removes judge demo panels"
   assert.match(html, /id="lessonPanelToggle"/);
   assert.match(html, /id="lessonPanelSummary"/);
   assert.match(html, /id="stageRail"/);
+  assert.match(html, /id="formulaCard"/);
+  assert.match(html, /id="solutionDrawer"/);
   assert.match(html, /id="chatMessages"/);
   assert.match(html, /id="chatCheckpoint"/);
   assert.match(html, /id="voiceRecordBtn"/);

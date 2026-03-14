@@ -117,8 +117,8 @@ function buildCoachFeedback({ plan, snapshot, activeStep, allRequiredComplete })
   if (!snapshot.objects.length) {
     const firstRequired = suggestionById(plan, activeStep?.missingObjectIds?.[0] || activeStep?.requiredObjectIds?.[0]);
     return firstRequired
-      ? `Start by placing ${firstRequired.title}.`
-      : "Start by placing the main object from the lesson.";
+      ? `The lesson scene should already include ${firstRequired.title}. Reload the lesson if it is missing.`
+      : "The lesson scene should already be visible. Reload the lesson if it is missing.";
   }
 
   if (missingTitles.length) {
@@ -139,9 +139,62 @@ function buildCoachFeedback({ plan, snapshot, activeStep, allRequiredComplete })
   return `${activeStep?.title || "This step"} looks complete. Move to the next visible relationship.`;
 }
 
+function analyticAssessment(plan, snapshot, currentStepId = null) {
+  const sceneMoments = plan.sceneMoments || [];
+  const activeStep = plan.buildSteps.find((step) => step.id === currentStepId)
+    || plan.buildSteps[0]
+    || null;
+  const activeMoment = sceneMoments.find((moment) => moment.id === (activeStep?.id || currentStepId))
+    || sceneMoments[0]
+    || null;
+  return {
+    summary: {
+      objectCount: snapshot.objects.length,
+      matchedRequiredObjects: snapshot.objects.length,
+      totalRequiredObjects: snapshot.objects.length,
+      completionRatio: 1,
+      currentStepId: activeStep?.id || currentStepId || null,
+    },
+    objectAssessments: [],
+    stepAssessments: plan.buildSteps.map((step) => ({
+      stepId: step.id,
+      title: step.title,
+      complete: true,
+      missingObjectIds: [],
+      feedback: `${step.title} is available in the auto-rendered scene.`,
+    })),
+    activeStep: activeStep
+      ? {
+        stepId: activeStep.id,
+        title: activeStep.title,
+        complete: true,
+        missingObjectIds: [],
+        feedback: activeMoment?.goal || activeStep.instruction || "",
+      }
+      : null,
+    answerGate: {
+      allowed: true,
+      reason: "The analytic scene is ready for explanation.",
+    },
+    guidance: {
+      currentStepId: activeStep?.id || null,
+      currentStepTitle: activeStep?.title || "",
+      nextRequiredSuggestionIds: [],
+      readyForPrediction: true,
+      matchedSuggestionIds: plan.objectSuggestions.map((suggestion) => suggestion.id),
+      coachFeedback: activeMoment?.goal || activeStep?.instruction || plan.sceneFocus?.primaryInsight || "Use the scene and formula together.",
+      missingTitles: [],
+      selectedObjectId: snapshot.selectedObjectId || null,
+    },
+  };
+}
+
 export function evaluateBuild(planInput, snapshotInput, currentStepId = null) {
   const plan = normalizeScenePlan(planInput);
   const snapshot = normalizeSceneSnapshot(snapshotInput);
+  if (plan.experienceMode === "analytic_auto") {
+    return analyticAssessment(plan, snapshot, currentStepId);
+  }
   const usedIds = new Set();
 
   const objectAssessments = plan.objectSuggestions.map((suggestion) => {
@@ -211,8 +264,8 @@ export function evaluateBuild(planInput, snapshotInput, currentStepId = null) {
     answerGate: {
       allowed: allRequiredComplete,
       reason: allRequiredComplete
-        ? "Build complete enough to answer."
-        : "Add the required scene objects before answering.",
+        ? "Scene ready enough to answer."
+        : "Inspect the remaining key objects before answering.",
     },
     guidance: {
       currentStepId: activeStep?.stepId || null,

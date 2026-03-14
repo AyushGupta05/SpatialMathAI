@@ -41,11 +41,54 @@ test("normalizeScenePlan preserves lesson metadata and fills defaults", () => {
       scriptBeat: "Turn the diagram into a scene.",
       recommendedCategory: "Best of Multimodal Understanding",
     },
+    experienceMode: "analytic_auto",
     learningMoments: {
       predict: {
         prompt: "Which visible value is the radius?",
       },
     },
+    analyticContext: {
+      subtype: "line_plane_intersection",
+      entities: {
+        points: [{ id: "p", label: "P", coordinates: [1, -2, 3] }],
+        lines: [{ id: "line", label: "Line", point: [1, -2, 3], direction: [2, 1, -1] }],
+        planes: [{ id: "plane", label: "Plane", normal: [2, -1, 1], constant: 7 }],
+      },
+      derivedValues: { parameterValue: 0 },
+      formulaCard: {
+        title: "Line-Plane Intersection",
+        formula: "n · (p + td) = c",
+        explanation: "Substitute the line into the plane.",
+      },
+      solutionSteps: [{
+        id: "analytic-step-1",
+        title: "Write the line equation",
+        formula: "r = p + td",
+        explanation: "Start with the vector equation of the line.",
+      }],
+    },
+    sceneMoments: [{
+      id: "observe",
+      title: "Observe",
+      prompt: "Rotate the scene.",
+      goal: "Spot the line and plane.",
+      focusTargets: ["primary-object"],
+      visibleObjectIds: ["primary-object"],
+      visibleOverlayIds: ["analytic-axes"],
+      cameraBookmarkId: "camera-1",
+      revealFormula: false,
+      revealFullSolution: false,
+    }],
+    sceneOverlays: [{
+      id: "analytic-axes",
+      type: "coordinate-frame",
+      bounds: {
+        x: [-4, 4],
+        y: [-4, 4],
+        z: [-4, 4],
+        tickStep: 1,
+      },
+    }],
     objectSuggestions: [{
       id: "primary-object",
       title: "Cylinder model",
@@ -71,9 +114,13 @@ test("normalizeScenePlan preserves lesson metadata and fills defaults", () => {
   assert.deepEqual(plan.sourceSummary.givens, ["radius = 3", "height = 7"]);
   assert.deepEqual(plan.sourceEvidence.conflicts, ["Image labels radius as 4, but text says 3."]);
   assert.equal(plan.sceneFocus.concept, "radius vs height");
+  assert.equal(plan.experienceMode, "analytic_auto");
   assert.equal(plan.objectSuggestions[0].roles[0], "primary");
   assert.deepEqual(plan.objectSuggestions[0].object.metadata.roles, ["primary", "cylinder"]);
   assert.equal(plan.learningMoments.predict.prompt, "Which visible value is the radius?");
+  assert.equal(plan.analyticContext?.formulaCard?.formula, "n · (p + td) = c");
+  assert.equal(plan.sceneMoments[0].id, "observe");
+  assert.equal(plan.sceneOverlays[0].type, "coordinate-frame");
   assert.equal(plan.learningMoments.reflect.title, "Reflect");
   assert.ok(plan.learningMoments.challenge.whyItMatters.length > 0);
   assert.equal(plan.agentTrace[0].id, "source-interpreter");
@@ -83,5 +130,6 @@ test("normalizeScenePlan preserves lesson metadata and fills defaults", () => {
   assert.equal(plan.lessonStages[0].title, "Place the cylinder");
   assert.equal(plan.lessonStages[0].checkpointPrompt, "Does this look correct?");
   assert.ok(plan.lessonStages[0].suggestedActions.some((action) => action.kind === "preview-required-object"));
-  assert.ok(plan.lessonStages[0].suggestedActions.some((action) => action.kind === "build-manually"));
+  assert.ok(plan.lessonStages[0].suggestedActions.some((action) => action.kind === "explain-stage"));
+  assert.ok(plan.lessonStages[0].suggestedActions.some((action) => action.kind === "reset-view"));
 });

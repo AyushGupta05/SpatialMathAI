@@ -5,8 +5,9 @@ import { mergeGeneratedPlan } from "./plan/mergePlan.js";
 import { buildSourceEvidence } from "./plan/sourceEvidence.js";
 import { buildDemoPreset } from "./plan/demoPreset.js";
 import { retrieveLessonExemplar } from "./plan/retrieval.js";
+import { buildAnalyticPlan } from "./plan/analytic.js";
 
-function buildAgentTrace({ sourceSummary, retrieval, usedNovaPlan }) {
+function buildAgentTrace({ sourceSummary, retrieval, usedNovaPlan, usedAnalyticPlan }) {
   return [
     {
       id: "source-interpreter",
@@ -18,11 +19,13 @@ function buildAgentTrace({ sourceSummary, retrieval, usedNovaPlan }) {
     },
     {
       id: "lesson-planner",
-      label: "Lesson Planner",
-      status: usedNovaPlan ? "nova" : "fallback",
-      summary: usedNovaPlan
-        ? "Used Nova planning with retrieval-informed lesson scaffolding."
-        : "Used heuristic planning fallback to keep the lesson reliable.",
+      label: usedAnalyticPlan ? "Analytic Solver" : "Lesson Planner",
+      status: usedAnalyticPlan ? "deterministic" : usedNovaPlan ? "nova" : "fallback",
+      summary: usedAnalyticPlan
+        ? "Used the deterministic analytic geometry planner for reliable formulas, helpers, and scene beats."
+        : usedNovaPlan
+          ? "Used Nova planning with retrieval-informed lesson scaffolding."
+          : "Used heuristic planning fallback to keep the lesson reliable.",
     },
     {
       id: "build-evaluator",
@@ -45,28 +48,32 @@ export async function generateScenePlan({ questionText = "", imageAsset = null, 
   const sourceSummary = await interpretQuestionSource({ questionText, imageAsset });
   const workingQuestion = (sourceSummary.cleanedQuestion || questionText || "").trim();
   const retrieval = await retrieveLessonExemplar({ questionText: workingQuestion, sourceSummary });
-  const baselinePlan = heuristicPlan(workingQuestion, mode, sourceSummary);
   let usedNovaPlan = false;
+  const analyticPlan = buildAnalyticPlan(workingQuestion, sourceSummary);
+  const usedAnalyticPlan = Boolean(analyticPlan);
+  const baselinePlan = analyticPlan || heuristicPlan(workingQuestion, mode, sourceSummary);
   let mergedPlan = baselinePlan;
 
-  try {
-    const novaPlan = await planFromNova({
-      questionText: workingQuestion,
-      mode,
-      sceneSnapshot,
-      sourceSummary,
-      exemplar: retrieval.exemplar,
-    });
-    usedNovaPlan = true;
+  if (!usedAnalyticPlan) {
+    try {
+      const novaPlan = await planFromNova({
+        questionText: workingQuestion,
+        mode,
+        sceneSnapshot,
+        sourceSummary,
+        exemplar: retrieval.exemplar,
+      });
+      usedNovaPlan = true;
 
-    mergedPlan = mergeGeneratedPlan({
-      baselinePlan,
-      novaPlan,
-      workingQuestion,
-      mode,
-    });
-  } catch (error) {
-    console.warn("Falling back to heuristic scene plan:", error?.message || error);
+      mergedPlan = mergeGeneratedPlan({
+        baselinePlan,
+        novaPlan,
+        workingQuestion,
+        mode,
+      });
+    } catch (error) {
+      console.warn("Falling back to heuristic scene plan:", error?.message || error);
+    }
   }
 
   const sourceEvidence = buildSourceEvidence(sourceSummary);
@@ -79,6 +86,7 @@ export async function generateScenePlan({ questionText = "", imageAsset = null, 
     sourceSummary,
     retrieval,
     usedNovaPlan,
+    usedAnalyticPlan,
   });
 
   const scenePlan = {

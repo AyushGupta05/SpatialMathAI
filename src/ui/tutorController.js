@@ -4,13 +4,15 @@ import {
   askTutor,
   requestVoiceResponse,
 } from "../ai/client.js";
-import { normalizeScenePlan } from "../ai/planSchema.js";
+import { buildSceneSnapshotFromSuggestions, normalizeScenePlan } from "../ai/planSchema.js";
 import { computeGeometry } from "../core/geometry.js";
 import { initLabelRenderer, renderLabels, addLabel, clearLabels } from "../render/labels.js";
+import { AnalyticOverlayManager } from "../render/analyticOverlayManager.js";
 import { CameraDirector } from "../render/cameraDirector.js";
 import { tutorState } from "../state/tutorState.js";
 import { initUnfoldDrawer, syncUnfoldDrawer } from "./unfoldDrawer.js";
 import { MicrophoneCapture } from "./microphoneCapture.js";
+import { extractPastedQuestionImageFile } from "./questionImage.js";
 
 let world = null;
 let sceneApi = null;
@@ -24,6 +26,9 @@ let voiceRecording = false;
 let activeMicCapture = null;
 let lastAnnouncedStageKey = null;
 let lastCheckpointKey = null;
+let analyticOverlayManager = null;
+let analyticFormulaVisible = false;
+let analyticFullSolutionVisible = false;
 
 let questionSection;
 let questionInput;
@@ -55,6 +60,15 @@ let sceneValidation;
 let cameraBookmarkList;
 let objectCount;
 let stepIndicator;
+let formulaCard;
+let formulaCardTitle;
+let formulaCardEquation;
+let formulaCardExplanation;
+let formulaCardRevealBtn;
+let solutionDrawer;
+let solutionDrawerTitle;
+let solutionDrawerSteps;
+let solutionDrawerClose;
 
 function formatNumber(value, digits = 2) {
   const next = Number(value);
@@ -68,6 +82,19 @@ function formatKilobytes(bytes) {
 
 function activePlan() {
   return tutorState.plan;
+}
+
+function isAnalyticPlan(plan = activePlan()) {
+  return plan?.experienceMode === "analytic_auto";
+}
+
+function currentSceneMoment(plan = activePlan()) {
+  if (!plan?.sceneMoments?.length) return null;
+  const currentStepId = tutorState.getCurrentStep()?.id || null;
+  return plan.sceneMoments.find((moment) => moment.id === currentStepId)
+    || plan.sceneMoments[Math.min(tutorState.currentStep, plan.sceneMoments.length - 1)]
+    || plan.sceneMoments[0]
+    || null;
 }
 
 function currentSnapshot() {
@@ -226,6 +253,40 @@ function renderQuestionImageState() {
   }
 }
 
+function validateQuestionImage(file) {
+  if (!file) return null;
+  if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+    return "Only PNG, JPEG, and WEBP diagrams are supported.";
+  }
+  if (file.size > 3.75 * 1024 * 1024) {
+    return "Uploaded diagram must be 3.75 MB or smaller.";
+  }
+  return null;
+}
+
+function setQuestionImageFile(file, { announcePaste = false } = {}) {
+  const errorMessage = validateQuestionImage(file);
+  if (errorMessage) {
+    questionImageFile = null;
+    if (questionImageInput) questionImageInput.value = "";
+    renderQuestionImageState();
+    setQuestionStatus(errorMessage, "error");
+    return false;
+  }
+
+  questionImageFile = file || null;
+  if (questionImageInput && !file) {
+    questionImageInput.value = "";
+  }
+  renderQuestionImageState();
+  setQuestionPanelCollapsed(questionSection?.classList.contains("is-collapsed"), { force: true });
+  setQuestionStatus(
+    announcePaste && file ? `Pasted image ready: ${file.name}` : "",
+    announcePaste && file ? "loading" : "hidden"
+  );
+  return true;
+}
+
 function lessonPanelSummaryText() {
   const plan = activePlan();
   const planQuestion = plan?.sourceSummary?.cleanedQuestion || plan?.problem?.question || "";
@@ -318,17 +379,14 @@ function stageActionsForClient(plan = activePlan(), assessment = tutorState.late
   if (!plan) return [];
 
   const stage = currentLessonStage(plan);
+  if (isAnalyticPlan(plan)) {
+    return stage?.suggestedActions?.length ? stage.suggestedActions : [];
+  }
   const learningStage = tutorState.learningStage;
   const defaultExplain = {
     id: `${stage?.id || learningStage}-explain`,
-    label: "Explain First",
+    label: learningStage === "orient" ? "Explain the Scene" : "Explain This Step",
     kind: "explain-stage",
-    payload: { stageId: stage?.id || null },
-  };
-  const manualAction = {
-    id: `${stage?.id || learningStage}-manual`,
-    label: "Place Manually",
-    kind: "build-manually",
     payload: { stageId: stage?.id || null },
   };
   const continueAction = {
@@ -337,72 +395,35 @@ function stageActionsForClient(plan = activePlan(), assessment = tutorState.late
     kind: "continue-stage",
     payload: { stageId: stage?.id || null },
   };
-  const showMistakeAction = {
-    id: `${stage?.id || learningStage}-mistake`,
-    label: "Show Me the Mistake",
-    kind: "show-mistake",
-    payload: { stageId: stage?.id || null, prompt: stage?.mistakeProbe || "Show me the mistake in this stage." },
+  const resetAction = {
+    id: `${stage?.id || learningStage}-reset`,
+    label: "Reset View",
+    kind: "reset-view",
+    payload: { stageId: stage?.id || null },
   };
-
-  if (learningStage === "orient") {
-    return [
-      {
-        id: `${stage?.id || "lesson"}-guided`,
-        label: "Start Guided Build",
-        kind: "start-guided-build",
-        payload: { stageId: stage?.id || null },
-      },
-      manualAction,
-      defaultExplain,
-      {
-        id: `${stage?.id || "lesson"}-skip`,
-        label: "Skip",
-        kind: "skip-stage",
-        payload: { stageId: stage?.id || null },
-      },
-    ];
-  }
-
-  if (learningStage === "build") {
-    const previewAction = fillPreviewActionObjectSpec(
-      stage?.suggestedActions?.find((action) => action.kind === "preview-required-object")
-        || {
-          id: `${stage?.id || "lesson"}-preview`,
-          label: nextRequiredSuggestion(plan, assessment)?.title
-            ? `Preview ${nextRequiredSuggestion(plan, assessment).title}`
-            : "Preview Next Object",
-          kind: "preview-required-object",
-          payload: {
-            stageId: stage?.id || null,
-            suggestionId: nextRequiredSuggestion(plan, assessment)?.id || null,
-          },
+  const previewAction = fillPreviewActionObjectSpec(
+    stage?.suggestedActions?.find((action) => action.kind === "preview-required-object")
+      || {
+        id: `${stage?.id || "lesson"}-preview`,
+        label: nextRequiredSuggestion(plan, assessment)?.title
+          ? `Preview ${nextRequiredSuggestion(plan, assessment).title}`
+          : "Preview Scene",
+        kind: "preview-required-object",
+        payload: {
+          stageId: stage?.id || null,
+          suggestionId: nextRequiredSuggestion(plan, assessment)?.id || null,
         },
-      plan,
-      assessment
-    );
+      },
+    plan,
+    assessment
+  );
 
-    const actions = [];
-    if (previewAction?.payload?.objectSpec) {
-      actions.push(previewAction);
-    }
-    actions.push(manualAction, defaultExplain);
-    actions.push(assessment?.activeStep?.complete || assessment?.guidance?.readyForPrediction ? continueAction : showMistakeAction);
-    return actions.slice(0, 4);
+  const actions = [];
+  if (previewAction?.payload?.objectSpec) {
+    actions.push(previewAction);
   }
-
-  if (learningStage === "predict") {
-    return tutorState.predictionState.submitted ? [continueAction, defaultExplain] : [defaultExplain];
-  }
-
-  if (learningStage === "check") {
-    return [defaultExplain, showMistakeAction, continueAction];
-  }
-
-  if (learningStage === "reflect") {
-    return [defaultExplain, continueAction];
-  }
-
-  return [defaultExplain];
+  actions.push(defaultExplain, continueAction, resetAction);
+  return actions.slice(0, 4);
 }
 
 function buildSystemContextMessage(plan = activePlan()) {
@@ -411,7 +432,10 @@ function buildSystemContextMessage(plan = activePlan()) {
   const source = evidence.diagramSummary || "Using the typed prompt as the source.";
   const givens = evidence.givens?.length ? ` Givens: ${evidence.givens.join(", ")}.` : "";
   const conflicts = evidence.conflicts?.length ? ` Check this mismatch: ${evidence.conflicts.join(" ")}` : "";
-  return `${source}${givens}${conflicts}`.trim();
+  const analytic = isAnalyticPlan(plan)
+    ? ` Nova auto-drew the scene for ${plan.analyticContext?.subtype?.replaceAll("_", " ") || "analytic geometry"}.`
+    : "";
+  return `${source}${givens}${conflicts}${analytic}`.trim();
 }
 
 function buildStageIntroMessage(plan = activePlan(), assessment = tutorState.latestAssessment) {
@@ -420,6 +444,11 @@ function buildStageIntroMessage(plan = activePlan(), assessment = tutorState.lat
   const learningStage = tutorState.learningStage;
   const stage = currentLessonStage(plan);
   const index = currentStageIndex(plan);
+
+  if (isAnalyticPlan(plan) && stage) {
+    const stageNumber = index >= 0 ? index + 1 : 1;
+    return `Step ${stageNumber}: ${stage.title}. ${stage.tutorIntro} Goal: ${stage.goal}`.trim();
+  }
 
   if ((learningStage === "orient" || learningStage === "build") && stage) {
     const stageNumber = index >= 0 ? index + 1 : 1;
@@ -453,6 +482,8 @@ function updateComposerState() {
     chatInput.disabled = !hasPlan;
     if (!hasPlan) {
       chatInput.placeholder = "Start a lesson above to chat with the tutor...";
+    } else if (isAnalyticPlan()) {
+      chatInput.placeholder = "Ask about the scene, formula, or the current visual step...";
     } else if (tutorState.learningStage === "predict" && !tutorState.predictionState.submitted) {
       chatInput.placeholder = "Type your one-sentence prediction...";
     } else {
@@ -475,6 +506,40 @@ function setCheckpointState(checkpoint = null) {
   }
   chatCheckpoint.classList.remove("hidden");
   chatCheckpointPrompt.textContent = checkpoint.prompt || "Does this look correct?";
+}
+
+function renderAnalyticPanels(plan = activePlan()) {
+  const analytic = plan?.analyticContext || null;
+  const showFormulaCard = Boolean(isAnalyticPlan(plan) && analytic && (analyticFormulaVisible || currentSceneMoment(plan)?.revealFormula));
+  const showSolutionDrawer = Boolean(isAnalyticPlan(plan) && analytic && analyticFullSolutionVisible);
+
+  formulaCard?.classList.toggle("hidden", !showFormulaCard);
+  solutionDrawer?.classList.toggle("hidden", !showSolutionDrawer);
+
+  if (!showFormulaCard || !analytic) return;
+
+  if (formulaCardTitle) formulaCardTitle.textContent = analytic.formulaCard?.title || "Relevant Formula";
+  if (formulaCardEquation) formulaCardEquation.textContent = analytic.formulaCard?.formula || plan.answerScaffold?.formula || "";
+  if (formulaCardExplanation) formulaCardExplanation.textContent = analytic.formulaCard?.explanation || plan.answerScaffold?.explanation || "";
+  if (formulaCardRevealBtn) {
+    formulaCardRevealBtn.textContent = showSolutionDrawer ? "Hide Full Solution" : "Reveal Full Solution";
+  }
+
+  if (showSolutionDrawer && solutionDrawerTitle && solutionDrawerSteps) {
+    solutionDrawerTitle.textContent = analytic.formulaCard?.title || "Worked Solution";
+    solutionDrawerSteps.innerHTML = "";
+    (analytic.solutionSteps || []).forEach((step, index) => {
+      const item = document.createElement("div");
+      item.className = "solution-step";
+      item.innerHTML = `
+        <p class="solution-step-index">Step ${index + 1}</p>
+        <h4>${escapeHtml(step.title)}</h4>
+        <p class="solution-step-formula">${escapeHtml(step.formula || "")}</p>
+        <p class="solution-step-copy">${escapeHtml(step.explanation || "")}</p>
+      `;
+      solutionDrawerSteps.appendChild(item);
+    });
+  }
 }
 
 function updateStageRail() {
@@ -517,6 +582,7 @@ function updateStageRail() {
     stageRailGoal.textContent = plan.learningMoments?.challenge?.goal || "Ask anything about the model and the tutor will keep bringing the answer back to the scene.";
   }
 
+  renderAnalyticPanels(plan);
   updateComposerState();
 }
 
@@ -563,6 +629,21 @@ function renderSceneInfo() {
     `
     : `<p class="muted-text" style="margin:8px 0 0">Select an object in the scene to inspect its measurements and role.</p>`;
 
+  if (isAnalyticPlan(plan)) {
+    const analyticSelectionMarkup = selected
+      ? `<p class="muted-text" style="margin:8px 0 0">Selected: <strong>${escapeHtml(selected.label)}</strong> ${escapeHtml(JSON.stringify(selected.params || {}))}</p>`
+      : `<p class="muted-text" style="margin:8px 0 0">Select a line, plane, point, or helper to inspect it.</p>`;
+    const currentMoment = currentSceneMoment(plan);
+    sceneInfo.innerHTML = `
+      <p style="margin:0 0 6px"><strong>${escapeHtml(plan.sourceSummary?.cleanedQuestion || plan.problem?.question || "Current lesson")}</strong></p>
+      <p class="muted-text">${count} object${count === 1 ? "" : "s"} currently visible in the world</p>
+      <p class="muted-text">Current visual step: <span class="formula">${escapeHtml(currentMoment?.title || "Observe")}</span></p>
+      <p class="muted-text">Focus: <span class="formula">${escapeHtml(plan.sceneFocus?.primaryInsight || currentMoment?.goal || "")}</span></p>
+      ${analyticSelectionMarkup}
+    `;
+    return;
+  }
+
   sceneInfo.innerHTML = `
     <p style="margin:0 0 6px"><strong>${escapeHtml(plan.sourceSummary?.cleanedQuestion || plan.problem?.question || "Current lesson")}</strong></p>
     <p class="muted-text">${count} object${count === 1 ? "" : "s"} currently in the world</p>
@@ -574,16 +655,26 @@ function renderSceneInfo() {
 function renderAssessment(assessment) {
   if (!sceneValidation) return;
   if (!assessment) {
-    sceneValidation.innerHTML = `<p class="muted-text">The tutor will evaluate the scene as you build and highlight the next move.</p>`;
+    sceneValidation.innerHTML = `<p class="muted-text">The tutor will inspect the scene and highlight the next useful idea.</p>`;
+    return;
+  }
+
+  if (isAnalyticPlan()) {
+    const currentMoment = currentSceneMoment();
+    sceneValidation.innerHTML = `
+      <div class="validation-stat"><strong>Auto scene ready</strong></div>
+      <div class="validation-stat"><strong>${escapeHtml(currentMoment?.title || "Observe")}</strong><br />${escapeHtml(currentMoment?.goal || assessment.guidance?.coachFeedback || "Use the visible scene to reason.")}</div>
+      <div class="validation-stat"><strong>Formula</strong><br />${escapeHtml(activePlan()?.analyticContext?.formulaCard?.formula || activePlan()?.answerScaffold?.formula || "Reveal when ready")}</div>
+    `;
     return;
   }
 
   const guidance = assessment.guidance || {};
-  const readyLabel = guidance.readyForPrediction ? "Prediction ready" : "Keep building";
+  const readyLabel = guidance.readyForPrediction ? "Scene ready" : "Scene preview";
   sceneValidation.innerHTML = `
-    <div class="validation-stat"><strong>${assessment.summary.matchedRequiredObjects}/${assessment.summary.totalRequiredObjects}</strong> required objects matched</div>
-    <div class="validation-stat"><strong>${Math.round(assessment.summary.completionRatio * 100)}%</strong> build completion</div>
-    <div class="validation-stat"><strong>${readyLabel}</strong><br />${escapeHtml(guidance.coachFeedback || "The tutor is watching for the next relationship.")}</div>
+    <div class="validation-stat"><strong>${readyLabel}</strong></div>
+    <div class="validation-stat"><strong>${assessment.summary.objectCount}</strong> object${assessment.summary.objectCount === 1 ? "" : "s"} visible</div>
+    <div class="validation-stat"><strong>Next focus</strong><br />${escapeHtml(guidance.coachFeedback || "The tutor is highlighting the next relationship.")}</div>
   `;
 }
 
@@ -602,8 +693,58 @@ function renderCameraBookmarks(plan = activePlan()) {
   });
 }
 
+function sceneDirectiveForCurrentMoment(plan = activePlan()) {
+  if (!isAnalyticPlan(plan)) return null;
+  const moment = currentSceneMoment(plan);
+  if (!moment) return null;
+  return {
+    stageId: moment.id,
+    cameraBookmarkId: moment.cameraBookmarkId || null,
+    focusTargets: moment.focusTargets || [],
+    visibleObjectIds: moment.visibleObjectIds || [],
+    visibleOverlayIds: moment.visibleOverlayIds || [],
+    revealFormula: Boolean(moment.revealFormula),
+    revealFullSolution: Boolean(moment.revealFullSolution),
+  };
+}
+
+function applySceneDirective(sceneDirective = null, { forceCamera = false } = {}) {
+  const plan = activePlan();
+  if (!isAnalyticPlan(plan) || !sceneDirective) return;
+
+  const visibleIds = sceneDirective.visibleObjectIds?.length
+    ? sceneDirective.visibleObjectIds
+    : currentSceneMoment(plan)?.visibleObjectIds || [];
+  const snapshot = buildSceneSnapshotFromSuggestions(plan, visibleIds);
+  sceneApi?.loadSnapshot?.(snapshot, "analytic-auto");
+  analyticOverlayManager?.render(plan, sceneDirective.visibleOverlayIds || []);
+
+  const bookmark = (plan.cameraBookmarks || []).find((item) => item.id === sceneDirective.cameraBookmarkId);
+  if (bookmark && forceCamera) {
+    cameraDirector.animateTo(bookmark.position, bookmark.target, 900);
+  }
+
+  if (sceneDirective.focusTargets?.length) {
+    focusStageTargets(sceneDirective.focusTargets, { selectFirst: true });
+  }
+
+  if (sceneDirective.revealFormula) {
+    analyticFormulaVisible = true;
+  }
+  renderAnalyticPanels(plan);
+  renderAnnotations();
+}
+
+function applyAnalyticSceneState({ forceCamera = false } = {}) {
+  if (!isAnalyticPlan()) return;
+  applySceneDirective(sceneDirectiveForCurrentMoment(), { forceCamera });
+}
+
 function renderAnnotations() {
   if (!world?.scene) return;
+  if (isAnalyticPlan()) {
+    return;
+  }
   clearLabels(world.scene);
   currentSnapshot().objects.forEach((objectSpec) => {
     const [x, y, z] = objectSpec.position;
@@ -619,7 +760,11 @@ function announceCurrentStage(force = false) {
   if (!force && lastAnnouncedStageKey === stageKey) return;
 
   lastAnnouncedStageKey = stageKey;
-  focusStageTargets(stageFocusTargets(plan), { selectFirst: tutorState.learningStage === "build" });
+  if (isAnalyticPlan(plan)) {
+    applyAnalyticSceneState({ forceCamera: force });
+  } else {
+    focusStageTargets(stageFocusTargets(plan), { selectFirst: tutorState.learningStage === "build" });
+  }
   addTranscriptMessage("tutor", buildStageIntroMessage(plan), {
     actions: stageActionsForClient(plan),
   });
@@ -643,6 +788,15 @@ async function syncAssessment() {
     });
     tutorState.setAssessment(assessment);
     syncStepFromAssessment(plan, assessment);
+
+    if (isAnalyticPlan(plan)) {
+      renderAssessment(assessment);
+      renderSceneInfo();
+      setCheckpointState(null);
+      updateStageRail();
+      announceCurrentStage();
+      return;
+    }
 
     if (
       tutorState.learningStage === "build"
@@ -689,9 +843,11 @@ function setPlan(plan, options = {}) {
   voiceConversationId = null;
   lastAnnouncedStageKey = null;
   lastCheckpointKey = null;
+  analyticFormulaVisible = false;
+  analyticFullSolutionVisible = false;
   tutorState.setPlan(normalizedPlan, { mode: options.mode || normalizedPlan.problem?.mode || "guided" });
-  tutorState.setPhase("plan_ready");
-  tutorState.setLearningStage("orient");
+  tutorState.setPhase(isAnalyticPlan(normalizedPlan) ? "guided_build" : "plan_ready");
+  tutorState.setLearningStage(isAnalyticPlan(normalizedPlan) ? "build" : "orient");
   lastSceneFeedback = normalizedPlan.sceneFocus?.primaryInsight || "Nova Prism will react to what you do in the scene.";
 
   clearTranscript();
@@ -705,6 +861,13 @@ function setPlan(plan, options = {}) {
     sceneApi?.clearScene?.();
   }
   sceneApi?.clearFocus?.();
+  analyticOverlayManager?.clear();
+  if (!isAnalyticPlan(normalizedPlan)) {
+    const autoSnapshot = buildSceneSnapshotFromSuggestions(normalizedPlan);
+    if (autoSnapshot.objects.length) {
+      sceneApi?.loadSnapshot?.(autoSnapshot, "lesson-auto");
+    }
+  }
   questionSection?.classList.add("is-compact");
   setQuestionPanelCollapsed(true, { force: true });
   switchToTab("tutor");
@@ -720,6 +883,10 @@ async function handleQuestionSubmit(overrides = {}) {
 
   tutorState.reset();
   tutorState.setPhase("parsing");
+  analyticFormulaVisible = false;
+  analyticFullSolutionVisible = false;
+  analyticOverlayManager?.clear();
+  renderAnalyticPanels(null);
   if (questionSubmit) questionSubmit.disabled = true;
   setQuestionStatus("Building a staged lesson from your prompt and scene...", "loading");
 
@@ -759,12 +926,25 @@ function sceneContextPayload(plan, assessment) {
     sceneFocus: plan?.sceneFocus || null,
     sourceSummary: plan?.sourceSummary || null,
     guidance: assessment?.guidance || null,
+    analyticContext: plan?.analyticContext || null,
+    sceneMoment: currentSceneMoment(plan) || null,
+    formulaVisible: analyticFormulaVisible,
+    fullSolutionVisible: analyticFullSolutionVisible,
   };
 }
 
 function beginGuidedBuild() {
   const plan = activePlan();
   if (!plan) return;
+  if (isAnalyticPlan(plan)) {
+    tutorState.setMode("guided");
+    tutorState.setPhase("guided_build");
+    tutorState.setLearningStage("build");
+    applyAnalyticSceneState({ forceCamera: true });
+    updateStageRail();
+    announceCurrentStage(true);
+    return;
+  }
   tutorState.setMode("guided");
   tutorState.setPhase("guided_build");
   tutorState.setLearningStage("build");
@@ -780,6 +960,10 @@ function beginGuidedBuild() {
 function beginManualBuild() {
   const plan = activePlan();
   if (!plan) return;
+  if (isAnalyticPlan(plan)) {
+    applyAnalyticSceneState({ forceCamera: true });
+    return;
+  }
   tutorState.setMode("manual");
   tutorState.setPhase("manual_build");
   tutorState.setLearningStage("build");
@@ -853,6 +1037,9 @@ async function sendTutorMessage(messageText, options = {}) {
     }
     if (response.checkpoint) {
       setCheckpointState(response.checkpoint);
+    }
+    if (response.sceneDirective) {
+      applySceneDirective(response.sceneDirective, { forceCamera: true });
     }
 
     lastSceneFeedback = response.text || lastSceneFeedback;
@@ -990,6 +1177,23 @@ function advanceLessonStage() {
   const plan = activePlan();
   if (!plan) return;
 
+  if (isAnalyticPlan(plan)) {
+    if (tutorState.currentStep < plan.lessonStages.length - 1) {
+      tutorState.nextStep();
+      lastSceneFeedback = currentLessonStage(plan)?.goal || "Move to the next visual step.";
+      setCheckpointState(null);
+      updateStageRail();
+      applyAnalyticSceneState({ forceCamera: true });
+      announceCurrentStage(true);
+      return;
+    }
+    analyticFormulaVisible = true;
+    analyticFullSolutionVisible = true;
+    renderAnalyticPanels(plan);
+    updateStageRail();
+    return;
+  }
+
   if (tutorState.learningStage === "orient") {
     beginGuidedBuild();
     return;
@@ -1048,6 +1252,31 @@ async function handleTutorAction(action = {}) {
   if (!plan) return;
 
   switch (action.kind) {
+    case "highlight-key-idea":
+      applyAnalyticSceneState({ forceCamera: true });
+      addTranscriptMessage("system", currentSceneMoment(plan)?.goal || "Highlighted the current idea in the scene.");
+      break;
+    case "show-formula":
+      analyticFormulaVisible = true;
+      renderAnalyticPanels(plan);
+      addTranscriptMessage("system", plan.analyticContext?.formulaCard?.formula || plan.answerScaffold?.formula || "Relevant formula revealed.");
+      break;
+    case "reveal-next-step":
+      advanceLessonStage();
+      break;
+    case "reveal-full-solution":
+      analyticFormulaVisible = true;
+      analyticFullSolutionVisible = true;
+      if (isAnalyticPlan(plan) && tutorState.currentStep < plan.lessonStages.length - 1) {
+        tutorState.goToStep(plan.lessonStages.length - 1);
+      }
+      applyAnalyticSceneState({ forceCamera: true });
+      renderAnalyticPanels(plan);
+      addTranscriptMessage("system", "Full worked solution revealed.");
+      break;
+    case "reset-view":
+      applyAnalyticSceneState({ forceCamera: true });
+      break;
     case "start-guided-build":
       beginGuidedBuild();
       break;
@@ -1126,6 +1355,18 @@ async function handleTutorAction(action = {}) {
 function handleSceneMutation(detail) {
   const plan = activePlan();
   if (!plan || !detail || detail.type !== "objects") return;
+  if (isAnalyticPlan(plan) && detail.reason === "analytic-auto") {
+    renderSceneInfo();
+    updateStageRail();
+    return;
+  }
+  if (!isAnalyticPlan(plan) && detail.reason === "lesson-auto") {
+    renderSceneInfo();
+    updateStageRail();
+    syncUnfoldDrawer();
+    scheduleAssessment();
+    return;
+  }
 
   if (detail.reason === "place" && detail.object?.label) {
     lastSceneFeedback = `Placed ${detail.object.label}. The tutor is checking how it fits the current goal.`;
@@ -1163,31 +1404,18 @@ function bindEvents() {
 
   questionImageInput?.addEventListener("change", () => {
     const file = questionImageInput.files?.[0] || null;
-    if (file && !["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
-      questionImageFile = null;
-      questionImageInput.value = "";
-      renderQuestionImageState();
-      setQuestionStatus("Only PNG, JPEG, and WEBP diagrams are supported.", "error");
-      return;
-    }
-    if (file && file.size > 3.75 * 1024 * 1024) {
-      questionImageFile = null;
-      questionImageInput.value = "";
-      renderQuestionImageState();
-      setQuestionStatus("Uploaded diagram must be 3.75 MB or smaller.", "error");
-      return;
-    }
-    questionImageFile = file;
-    renderQuestionImageState();
-    setQuestionPanelCollapsed(questionSection?.classList.contains("is-collapsed"), { force: true });
-    setQuestionStatus("", "hidden");
+    setQuestionImageFile(file);
   });
 
   questionImageClear?.addEventListener("click", () => {
-    questionImageFile = null;
-    if (questionImageInput) questionImageInput.value = "";
-    renderQuestionImageState();
-    setQuestionPanelCollapsed(questionSection?.classList.contains("is-collapsed"), { force: true });
+    setQuestionImageFile(null);
+  });
+
+  questionInput?.addEventListener("paste", (event) => {
+    const file = extractPastedQuestionImageFile(event.clipboardData?.items);
+    if (!file) return;
+    event.preventDefault();
+    setQuestionImageFile(file, { announcePaste: true });
   });
 
   buildFromDiagramBtn?.addEventListener("click", () => questionImageInput?.click());
@@ -1216,6 +1444,22 @@ function bindEvents() {
     kind: "show-mistake",
     payload: { prompt: currentLessonStage()?.mistakeProbe || "Show me the mistake in this stage." },
   }));
+  formulaCardRevealBtn?.addEventListener("click", () => {
+    if (analyticFullSolutionVisible) {
+      analyticFullSolutionVisible = false;
+      renderAnalyticPanels(activePlan());
+      return;
+    }
+    handleTutorAction({
+      id: "formula-reveal-solution",
+      label: "Reveal Full Solution",
+      kind: "reveal-full-solution",
+    });
+  });
+  solutionDrawerClose?.addEventListener("click", () => {
+    analyticFullSolutionVisible = false;
+    renderAnalyticPanels(activePlan());
+  });
 }
 
 function bindDom() {
@@ -1249,12 +1493,22 @@ function bindDom() {
   cameraBookmarkList = document.getElementById("cameraBookmarkList");
   objectCount = document.getElementById("objectCount");
   stepIndicator = document.getElementById("stepIndicator");
+  formulaCard = document.getElementById("formulaCard");
+  formulaCardTitle = document.getElementById("formulaCardTitle");
+  formulaCardEquation = document.getElementById("formulaCardEquation");
+  formulaCardExplanation = document.getElementById("formulaCardExplanation");
+  formulaCardRevealBtn = document.getElementById("formulaCardRevealBtn");
+  solutionDrawer = document.getElementById("solutionDrawer");
+  solutionDrawerTitle = document.getElementById("solutionDrawerTitle");
+  solutionDrawerSteps = document.getElementById("solutionDrawerSteps");
+  solutionDrawerClose = document.getElementById("solutionDrawerClose");
 }
 
 export function initTutorController(context) {
   world = context.world;
   sceneApi = context.sceneApi;
   cameraDirector = new CameraDirector(world.camera, world.controls);
+  analyticOverlayManager = new AnalyticOverlayManager(world, sceneApi);
 
   const stageWrap = document.querySelector(".stage-wrap");
   if (stageWrap) {
@@ -1270,6 +1524,7 @@ export function initTutorController(context) {
   renderAssessment(null);
   renderSceneInfo();
   updateStageRail();
+  renderAnalyticPanels(null);
   updateComposerState();
   updateVoiceStatus("Mic ready when the lesson is loaded.", "muted");
   stepIndicator?.classList.add("hidden");

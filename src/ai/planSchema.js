@@ -5,6 +5,7 @@ const VALID_LIVE_CHALLENGE_METRICS = ["volume", "surfaceArea"];
 const VALID_STEP_ACTIONS = ["add", "verify", "adjust", "observe", "answer"];
 const VALID_INPUT_MODES = ["text", "image", "multimodal"];
 const LESSON_STAGES = ["orient", "build", "predict", "check", "reflect", "challenge"];
+const VALID_EXPERIENCE_MODES = ["builder", "analytic_auto"];
 const VALID_TUTOR_ACTION_KINDS = [
   "start-guided-build",
   "build-manually",
@@ -15,6 +16,11 @@ const VALID_TUTOR_ACTION_KINDS = [
   "skip-stage",
   "continue-stage",
   "show-mistake",
+  "highlight-key-idea",
+  "show-formula",
+  "reveal-next-step",
+  "reveal-full-solution",
+  "reset-view",
 ];
 
 function normalizeString(value, fallback = "") {
@@ -35,6 +41,10 @@ function normalizeQuestionType(value) {
 
 function normalizeInputMode(value, fallback = "text") {
   return VALID_INPUT_MODES.includes(value) ? value : fallback;
+}
+
+function normalizeExperienceMode(value, fallback = "builder") {
+  return VALID_EXPERIENCE_MODES.includes(value) ? value : fallback;
 }
 
 function normalizeLessonStage(value, fallback = "orient") {
@@ -146,39 +156,40 @@ function stageActionsForStep(step, suggestionsById, stageIndex = 0) {
     || (step.suggestedObjectIds || []).map((id) => suggestionsById.get(id)).find(Boolean)
     || null;
 
-  const actions = [
-    normalizeTutorAction({
-      id: `${step.id}-guided`,
-      label: stageIndex === 0 ? "Start Guided Build" : primarySuggestion ? `Preview ${primarySuggestion.title}` : "Continue",
-      kind: primarySuggestion ? "preview-required-object" : "start-guided-build",
-      payload: primarySuggestion
-        ? {
-          stageId: step.id,
-          suggestionId: primarySuggestion.id,
-          objectSpec: primarySuggestion.object,
-          highlightTargets: [primarySuggestion.object.id],
-        }
-        : { stageId: step.id },
-    }),
-    normalizeTutorAction({
-      id: `${step.id}-manual`,
-      label: "Place Manually",
-      kind: "build-manually",
-      payload: { stageId: step.id },
-    }),
+  const actions = [];
+  if (primarySuggestion) {
+    actions.push(normalizeTutorAction({
+      id: `${step.id}-preview`,
+      label: `Preview ${primarySuggestion.title}`,
+      kind: "preview-required-object",
+      payload: {
+        stageId: step.id,
+        suggestionId: primarySuggestion.id,
+        objectSpec: primarySuggestion.object,
+        highlightTargets: [primarySuggestion.object.id],
+      },
+    }));
+  }
+  actions.push(
     normalizeTutorAction({
       id: `${step.id}-explain`,
-      label: "Explain First",
+      label: stageIndex === 0 ? "Explain the Scene" : "Explain This Step",
       kind: "explain-stage",
       payload: { stageId: step.id },
     }),
     normalizeTutorAction({
-      id: `${step.id}-skip`,
-      label: "Skip",
-      kind: "skip-stage",
+      id: `${step.id}-continue`,
+      label: "Continue",
+      kind: "continue-stage",
       payload: { stageId: step.id },
     }),
-  ];
+    normalizeTutorAction({
+      id: `${step.id}-reset`,
+      label: "Reset View",
+      kind: "reset-view",
+      payload: { stageId: step.id },
+    }),
+  );
 
   return actions.slice(0, 4);
 }
@@ -348,6 +359,50 @@ function normalizeCameraBookmark(bookmark = {}, index = 0) {
   };
 }
 
+function normalizeSceneMoment(moment = {}, index = 0) {
+  return {
+    id: normalizeString(moment.id, `moment-${index + 1}`),
+    title: normalizeString(moment.title, `Step ${index + 1}`),
+    prompt: normalizeString(moment.prompt, ""),
+    goal: normalizeString(moment.goal, ""),
+    focusTargets: uniqueStrings(moment.focusTargets),
+    visibleObjectIds: uniqueStrings(moment.visibleObjectIds),
+    visibleOverlayIds: uniqueStrings(moment.visibleOverlayIds),
+    cameraBookmarkId: normalizeString(moment.cameraBookmarkId, ""),
+    revealFormula: Boolean(moment.revealFormula),
+    revealFullSolution: Boolean(moment.revealFullSolution),
+  };
+}
+
+function normalizeSceneOverlay(overlay = {}, index = 0) {
+  const position = Array.isArray(overlay.position) ? overlay.position : null;
+  const origin = Array.isArray(overlay.origin) ? overlay.origin : null;
+  const target = Array.isArray(overlay.target) ? overlay.target : null;
+  const offset = Array.isArray(overlay.offset) ? overlay.offset : null;
+  const bounds = overlay.bounds && typeof overlay.bounds === "object"
+    ? {
+      x: Array.isArray(overlay.bounds.x) ? overlay.bounds.x : [-4, 4],
+      y: Array.isArray(overlay.bounds.y) ? overlay.bounds.y : [-4, 4],
+      z: Array.isArray(overlay.bounds.z) ? overlay.bounds.z : [-4, 4],
+      tickStep: Number(overlay.bounds.tickStep) || 1,
+    }
+    : null;
+
+  return {
+    id: normalizeString(overlay.id, `overlay-${index + 1}`),
+    type: normalizeString(overlay.type, "text"),
+    targetObjectId: normalizeString(overlay.targetObjectId, ""),
+    text: normalizeString(overlay.text, ""),
+    style: normalizeString(overlay.style, "annotation"),
+    color: normalizeString(overlay.color, ""),
+    position,
+    origin,
+    target,
+    offset,
+    bounds,
+  };
+}
+
 function normalizeBuildStep(step = {}, index = 0, suggestions = []) {
   const suggestionIds = new Set(suggestions.map((suggestion) => suggestion.id));
   const suggestedObjectIds = normalizeArray(step.suggestedObjectIds)
@@ -413,6 +468,52 @@ function normalizeLiveChallenge(liveChallenge = {}) {
   };
 }
 
+function normalizeAnalyticContext(analytic = {}) {
+  if (!analytic || typeof analytic !== "object") return null;
+  const entities = analytic.entities && typeof analytic.entities === "object"
+    ? {
+      points: normalizeArray(analytic.entities.points).map((point, index) => ({
+        id: normalizeString(point.id, `analytic-point-${index + 1}`),
+        label: normalizeString(point.label, `P${index + 1}`),
+        coordinates: Array.isArray(point.coordinates) ? point.coordinates.map((value) => Number(value) || 0) : [0, 0, 0],
+      })),
+      lines: normalizeArray(analytic.entities.lines).map((line, index) => ({
+        id: normalizeString(line.id, `analytic-line-${index + 1}`),
+        label: normalizeString(line.label, `Line ${index + 1}`),
+        point: Array.isArray(line.point) ? line.point.map((value) => Number(value) || 0) : [0, 0, 0],
+        direction: Array.isArray(line.direction) ? line.direction.map((value) => Number(value) || 0) : [1, 0, 0],
+      })),
+      planes: normalizeArray(analytic.entities.planes).map((plane, index) => ({
+        id: normalizeString(plane.id, `analytic-plane-${index + 1}`),
+        label: normalizeString(plane.label, `Plane ${index + 1}`),
+        normal: Array.isArray(plane.normal) ? plane.normal.map((value) => Number(value) || 0) : [0, 1, 0],
+        constant: Number(plane.constant) || 0,
+      })),
+    }
+    : { points: [], lines: [], planes: [] };
+
+  return {
+    subtype: normalizeString(analytic.subtype, ""),
+    entities,
+    derivedValues: analytic.derivedValues && typeof analytic.derivedValues === "object"
+      ? structuredClone(analytic.derivedValues)
+      : {},
+    formulaCard: analytic.formulaCard && typeof analytic.formulaCard === "object"
+      ? {
+        title: normalizeString(analytic.formulaCard.title, ""),
+        formula: normalizeString(analytic.formulaCard.formula, ""),
+        explanation: normalizeString(analytic.formulaCard.explanation, ""),
+      }
+      : { title: "", formula: "", explanation: "" },
+    solutionSteps: normalizeArray(analytic.solutionSteps).map((step, index) => ({
+      id: normalizeString(step.id, `analytic-step-${index + 1}`),
+      title: normalizeString(step.title, `Step ${index + 1}`),
+      formula: normalizeString(step.formula, ""),
+      explanation: normalizeString(step.explanation, ""),
+    })),
+  };
+}
+
 function buildPredictionPrompt({ sceneFocus = {}, answerScaffold = {}, liveChallenge = null }) {
   if (liveChallenge?.prompt) {
     return liveChallenge.prompt;
@@ -441,10 +542,14 @@ export function normalizeScenePlan(plan = {}) {
     .map((prompt, index) => normalizeChallengePrompt(prompt, index));
   const liveChallenge = normalizeLiveChallenge(plan.liveChallenge);
   const question = normalizeString(plan.problem?.question || plan.question, "");
+  const experienceMode = normalizeExperienceMode(plan.experienceMode, plan.analyticContext ? "analytic_auto" : "builder");
   const answerScaffold = normalizeAnswerScaffold(plan.answerScaffold || plan.answer || {});
   const sourceSummary = normalizeSourceSummary(plan.sourceSummary, question);
   const sceneFocus = normalizeSceneFocus(plan.sceneFocus, sourceSummary.cleanedQuestion || question);
   const sourceEvidence = normalizeSourceEvidence(plan.sourceEvidence, sourceSummary);
+  const analyticContext = normalizeAnalyticContext(plan.analyticContext);
+  const sceneMoments = normalizeArray(plan.sceneMoments).map((moment, index) => normalizeSceneMoment(moment, index));
+  const sceneOverlays = normalizeArray(plan.sceneOverlays).map((overlay, index) => normalizeSceneOverlay(overlay, index));
   const fallbackMoments = defaultLearningMoments({
     question: sourceSummary.cleanedQuestion || question,
     answerScaffold,
@@ -480,6 +585,7 @@ export function normalizeScenePlan(plan = {}) {
       summary: normalizeString(plan.problem?.summary || plan.summary || question, ""),
       mode: normalizeString(plan.problem?.mode || plan.mode, "guided"),
     },
+    experienceMode,
     overview: normalizeString(plan.overview, ""),
     sourceSummary,
     sceneFocus,
@@ -492,6 +598,9 @@ export function normalizeScenePlan(plan = {}) {
     liveChallenge,
     sourceEvidence,
     lessonStages,
+    analyticContext,
+    sceneMoments,
+    sceneOverlays,
     agentTrace: normalizeAgentTrace(plan.agentTrace),
     demoPreset: normalizeDemoPreset(plan.demoPreset, sceneFocus, sourceSummary),
   };

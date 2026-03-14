@@ -50,7 +50,7 @@ function probePort(port) {
     tester.once("listening", () => {
       tester.close(() => resolveProbe(true));
     });
-    tester.listen(port, "127.0.0.1");
+    tester.listen(port);
   });
 }
 

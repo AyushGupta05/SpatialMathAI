@@ -4,6 +4,14 @@ function suggestionById(plan, suggestionId) {
   return plan.objectSuggestions.find((suggestion) => suggestion.id === suggestionId) || null;
 }
 
+function sceneMomentForStage(plan, stageId = null, learningState = {}) {
+  if (!plan?.sceneMoments?.length) return null;
+  return plan.sceneMoments.find((moment) => moment.id === stageId)
+    || plan.sceneMoments[learningState?.currentStep || 0]
+    || plan.sceneMoments[0]
+    || null;
+}
+
 function currentLessonStage(plan, learningState = {}, contextStepId = null, assessment = null) {
   const explicitId = contextStepId
     || assessment?.guidance?.currentStepId
@@ -16,19 +24,50 @@ function currentLessonStage(plan, learningState = {}, contextStepId = null, asse
 
 function stageActionsForReply(plan, stage, learningState = {}, assessment = null) {
   if (!stage) return [];
+  if (plan.experienceMode === "analytic_auto") {
+    const sceneMoment = sceneMomentForStage(plan, stage.id, learningState);
+    const sceneIndex = Math.max(0, plan.sceneMoments.findIndex((moment) => moment.id === sceneMoment?.id));
+    const includeNext = sceneIndex < Math.max(plan.sceneMoments.length - 1, 0);
+    const actions = [
+      {
+        id: `${stage.id}-highlight`,
+        label: "Highlight Key Idea",
+        kind: "highlight-key-idea",
+        payload: { stageId: stage.id },
+      },
+      {
+        id: `${stage.id}-formula`,
+        label: "Show Formula",
+        kind: "show-formula",
+        payload: { stageId: stage.id },
+      },
+      includeNext
+        ? {
+          id: `${stage.id}-next`,
+          label: "Next Visual Step",
+          kind: "reveal-next-step",
+          payload: { stageId: stage.id },
+        }
+        : null,
+      {
+        id: `${stage.id}-solution`,
+        label: "Reveal Full Solution",
+        kind: "reveal-full-solution",
+        payload: { stageId: stage.id },
+      },
+      {
+        id: `${stage.id}-reset`,
+        label: "Reset View",
+        kind: "reset-view",
+        payload: { stageId: stage.id },
+      },
+    ].filter(Boolean);
+    return actions;
+  }
 
   const nextRequiredId = assessment?.guidance?.nextRequiredSuggestionIds?.[0] || null;
   const nextRequiredSuggestion = nextRequiredId ? suggestionById(plan, nextRequiredId) : null;
   const actions = [];
-
-  if ((learningState?.learningStage || "orient") === "orient") {
-    actions.push({
-      id: `${stage.id}-start`,
-      label: "Start Guided Build",
-      kind: "start-guided-build",
-      payload: { stageId: stage.id },
-    });
-  }
 
   if (nextRequiredSuggestion) {
     actions.push({
@@ -46,34 +85,24 @@ function stageActionsForReply(plan, stage, learningState = {}, assessment = null
 
   actions.push(
     {
-      id: `${stage.id}-manual`,
-      label: "Place Manually",
-      kind: "build-manually",
+      id: `${stage.id}-explain`,
+      label: (learningState?.learningStage || "orient") === "orient" ? "Explain the Scene" : "Explain This Step",
+      kind: "explain-stage",
       payload: { stageId: stage.id },
     },
     {
-      id: `${stage.id}-explain`,
-      label: "Explain First",
-      kind: "explain-stage",
-      payload: { stageId: stage.id },
-    }
-  );
-
-  if (assessment?.activeStep?.complete || assessment?.guidance?.readyForPrediction) {
-    actions.push({
       id: `${stage.id}-continue`,
       label: "Continue",
       kind: "continue-stage",
       payload: { stageId: stage.id },
-    });
-  } else {
-    actions.push({
-      id: `${stage.id}-mistake`,
-      label: "Show Me the Mistake",
-      kind: "show-mistake",
-      payload: { stageId: stage.id, prompt: stage.mistakeProbe },
-    });
-  }
+    },
+    {
+      id: `${stage.id}-reset`,
+      label: "Reset View",
+      kind: "reset-view",
+      payload: { stageId: stage.id },
+    },
+  );
 
   return actions.slice(0, 4);
 }
@@ -94,12 +123,15 @@ export function buildTutorResponseMeta({
 }) {
   const plan = normalizeScenePlan(planInput);
   const stage = currentLessonStage(plan, learningState, contextStepId, assessment);
+  const sceneMoment = sceneMomentForStage(plan, stage?.id || null, learningState);
   const nextRequiredSuggestionIds = assessment?.guidance?.nextRequiredSuggestionIds || [];
-  const focusTargets = stage?.highlightTargets?.length
-    ? stage.highlightTargets
-    : nextRequiredSuggestionIds
-      .map((id) => suggestionById(plan, id)?.object?.id)
-      .filter(Boolean);
+  const focusTargets = plan.experienceMode === "analytic_auto"
+    ? (sceneMoment?.focusTargets?.length ? sceneMoment.focusTargets : (stage?.highlightTargets || []))
+    : stage?.highlightTargets?.length
+      ? stage.highlightTargets
+      : nextRequiredSuggestionIds
+        .map((id) => suggestionById(plan, id)?.object?.id)
+        .filter(Boolean);
 
   return {
     actions: stageActionsForReply(plan, stage, learningState, assessment),
@@ -112,8 +144,21 @@ export function buildTutorResponseMeta({
       : null,
     stageStatus: {
       currentStageId: stage?.id || null,
-      canAdvance: Boolean(assessment?.activeStep?.complete || assessment?.guidance?.readyForPrediction),
+      canAdvance: plan.experienceMode === "analytic_auto"
+        ? true
+        : Boolean(assessment?.activeStep?.complete || assessment?.guidance?.readyForPrediction),
     },
     systemContextMessage: systemContextMessage(plan),
+    sceneDirective: plan.experienceMode === "analytic_auto"
+      ? {
+        stageId: sceneMoment?.id || stage?.id || null,
+        cameraBookmarkId: sceneMoment?.cameraBookmarkId || stage?.cameraBookmarkId || null,
+        focusTargets,
+        visibleObjectIds: sceneMoment?.visibleObjectIds || [],
+        visibleOverlayIds: sceneMoment?.visibleOverlayIds || [],
+        revealFormula: Boolean(sceneMoment?.revealFormula),
+        revealFullSolution: Boolean(sceneMoment?.revealFullSolution),
+      }
+      : null,
   };
 }

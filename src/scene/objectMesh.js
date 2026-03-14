@@ -113,7 +113,15 @@ export function applySceneObjectToMesh(world, mesh, objectSpec) {
     mesh.scale.set(1, 1, 1);
 
     if (spec.shape === "plane") {
-      mesh.rotation.x = -Math.PI / 2 + spec.rotation[0];
+      const normalVector = Array.isArray(spec.metadata?.normal) && spec.metadata.normal.length >= 3
+        ? new THREE.Vector3(...spec.metadata.normal).normalize()
+        : null;
+      if (normalVector && normalVector.lengthSq() > 0) {
+        const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), normalVector);
+        mesh.quaternion.copy(quaternion);
+      } else {
+        mesh.rotation.x = -Math.PI / 2 + spec.rotation[0];
+      }
     }
   } else {
     mesh.scale.set(1, 1, 1);

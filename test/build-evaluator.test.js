@@ -59,7 +59,7 @@ test("evaluateBuild returns actionable guidance while the build is incomplete", 
 
   assert.equal(assessment.guidance.readyForPrediction, false);
   assert.deepEqual(assessment.guidance.nextRequiredSuggestionIds, ["primary-object", "radius-helper"]);
-  assert.match(assessment.guidance.coachFeedback, /Start by placing/i);
+  assert.match(assessment.guidance.coachFeedback, /scene should already/i);
 });
 
 test("evaluateBuild marks the lesson ready for prediction when required objects are present", () => {
