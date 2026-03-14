@@ -14,7 +14,6 @@ The app is built for the Amazon Nova hackathon story:
 - Walks learners through `Orient -> Build -> Predict -> Check -> Reflect -> Challenge`
 - Evaluates the live scene as the learner builds and adjusts objects
 - Supports typed follow-ups plus push-to-talk voice coaching
-- Includes a one-click judge demo flow for hackathon recordings
 
 ## Stack
 
