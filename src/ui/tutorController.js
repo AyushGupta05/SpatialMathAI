@@ -871,7 +871,10 @@ function setPlan(plan, options = {}) {
   questionSection?.classList.add("is-compact");
   setQuestionPanelCollapsed(true, { force: true });
   switchToTab("tutor");
-  addTranscriptMessage("system", buildSystemContextMessage(normalizedPlan));
+  const systemContext = isAnalyticPlan(normalizedPlan) ? "" : buildSystemContextMessage(normalizedPlan);
+  if (systemContext) {
+    addTranscriptMessage("system", systemContext);
+  }
   announceCurrentStage(true);
   updateVoiceStatus("Mic ready. Hold to talk when you want to ask out loud.", "muted");
 }

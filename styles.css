@@ -1162,10 +1162,11 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 5px; }
 .chat-lesson-shell {
   flex: 1 1 auto;
   min-height: 0;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
   padding: 14px 16px !important;
+  overflow: hidden;
   background:
     linear-gradient(180deg, rgba(7, 16, 30, 0.9), rgba(4, 12, 22, 0.94)),
     radial-gradient(circle at top, rgba(72, 201, 255, 0.08), transparent 30%);
@@ -1220,7 +1221,16 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 5px; }
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
+}
+.formula-card-head > div {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+.formula-card-head .plan-btn {
+  flex: 0 0 auto;
+  max-width: 100%;
 }
 .formula-card-title {
   margin: 0;
@@ -1244,6 +1254,9 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 5px; }
 .solution-drawer-steps {
   display: grid;
   gap: 10px;
+  max-height: min(34vh, 280px);
+  overflow-y: auto;
+  padding-right: 2px;
 }
 .solution-step {
   padding: 12px 14px;
@@ -1277,6 +1290,7 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 5px; }
   line-height: 1.5;
 }
 .chat-messages {
+  flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   display: flex;

@@ -7,6 +7,35 @@ import { buildDemoPreset } from "./plan/demoPreset.js";
 import { retrieveLessonExemplar } from "./plan/retrieval.js";
 import { buildAnalyticPlan } from "./plan/analytic.js";
 
+export function buildAnalyticPlannerInput({ questionText = "", sourceSummary = {} }) {
+  const rawQuestion = String(questionText || sourceSummary.rawQuestion || "").trim();
+  const cleanedQuestion = String(sourceSummary.cleanedQuestion || "").trim();
+  const analyticQuestion = rawQuestion || cleanedQuestion;
+
+  if (!analyticQuestion) {
+    return {
+      questionText: "",
+      sourceSummary,
+    };
+  }
+
+  if (!rawQuestion) {
+    return {
+      questionText: analyticQuestion,
+      sourceSummary,
+    };
+  }
+
+  return {
+    questionText: rawQuestion,
+    sourceSummary: {
+      ...sourceSummary,
+      rawQuestion,
+      cleanedQuestion: rawQuestion,
+    },
+  };
+}
+
 function buildAgentTrace({ sourceSummary, retrieval, usedNovaPlan, usedAnalyticPlan }) {
   return [
     {
@@ -49,7 +78,8 @@ export async function generateScenePlan({ questionText = "", imageAsset = null, 
   const workingQuestion = (sourceSummary.cleanedQuestion || questionText || "").trim();
   const retrieval = await retrieveLessonExemplar({ questionText: workingQuestion, sourceSummary });
   let usedNovaPlan = false;
-  const analyticPlan = buildAnalyticPlan(workingQuestion, sourceSummary);
+  const analyticInput = buildAnalyticPlannerInput({ questionText, sourceSummary });
+  const analyticPlan = buildAnalyticPlan(analyticInput.questionText, analyticInput.sourceSummary);
   const usedAnalyticPlan = Boolean(analyticPlan);
   const baselinePlan = analyticPlan || heuristicPlan(workingQuestion, mode, sourceSummary);
   let mergedPlan = baselinePlan;

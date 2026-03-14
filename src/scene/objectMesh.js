@@ -1,7 +1,6 @@
 import * as THREE from "three";
 import {
   defaultPositionForShape,
-  distanceBetween,
   normalizeSceneObject,
   paramsToBaseSize,
 } from "./schema.js";
@@ -21,14 +20,14 @@ function buildMaterial(color, opacity = 0.9) {
 }
 
 function lineRadius(thickness = 0.08) {
-  return Math.max(0.025, Number(thickness || 0.08) * 0.5);
+  return Math.max(0.012, Number(thickness || 0.08) * 0.22);
 }
 
 function buildLineMesh(world, params, color) {
   const start = new THREE.Vector3(...params.start);
   const end = new THREE.Vector3(...params.end);
   if (typeof world?.buildLineMesh === "function") {
-    return world.buildLineMesh(start, end, Math.max(params.thickness || 0.08, distanceBetween(params.start, params.end)), color);
+    return world.buildLineMesh(start, end, params.thickness || 0.08, color);
   }
   const mesh = new THREE.Mesh(
     new THREE.CylinderGeometry(lineRadius(params.thickness), lineRadius(params.thickness), 0.02, 18),
@@ -43,7 +42,7 @@ function applyLineGeometry(world, mesh, params) {
   const end = new THREE.Vector3(...params.end);
   const thickness = params.thickness || 0.08;
   if (typeof world?.updateLineMesh === "function") {
-    world.updateLineMesh(mesh, start, end, Math.max(thickness, distanceBetween(params.start, params.end)));
+    world.updateLineMesh(mesh, start, end, thickness);
     return;
   }
   const delta = end.clone().sub(start);
@@ -81,7 +80,7 @@ function createMeshForShape(world, spec) {
     case "pyramid":
       return new THREE.Mesh(new THREE.ConeGeometry(spec.params.base / Math.sqrt(2), spec.params.height, 4), buildMaterial(spec.color));
     case "plane":
-      return new THREE.Mesh(new THREE.PlaneGeometry(spec.params.width, spec.params.depth), buildMaterial(spec.color, 0.72));
+      return new THREE.Mesh(new THREE.PlaneGeometry(spec.params.width, spec.params.depth), buildMaterial(spec.color, 0.28));
     case "pointMarker":
       return new THREE.Mesh(new THREE.SphereGeometry(spec.params.radius, 16, 12), buildMaterial(spec.color));
     case "line":
@@ -133,7 +132,7 @@ export function applySceneObjectToMesh(world, mesh, objectSpec) {
   mesh.userData.sceneParams = structuredClone(spec.params);
   mesh.userData.sceneMetadata = { ...spec.metadata };
   mesh.userData.baseSize = paramsToBaseSize(spec.shape, spec.params);
-  mesh.userData.baseOpacity = spec.shape === "plane" ? 0.72 : 0.9;
+  mesh.userData.baseOpacity = spec.shape === "plane" ? 0.28 : 0.9;
   mesh.userData.floorLocked = spec.shape !== "line" && spec.shape !== "plane";
   if (spec.shape === "line") {
     mesh.userData.lineStart = [...spec.params.start];

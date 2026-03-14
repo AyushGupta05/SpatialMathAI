@@ -2,6 +2,9 @@ export const EPSILON = 1e-8;
 
 export function normalizePromptText(value = "") {
   return String(value)
+    .replaceAll("\u2212", "-")
+    .replaceAll("\u2013", "-")
+    .replaceAll("\u2014", "-")
     .replaceAll("−", "-")
     .replaceAll("–", "-")
     .replaceAll("—", "-")
@@ -137,13 +140,26 @@ export function parsePlaneEquation(questionText = "") {
 
 export function parseLineThroughPointDirection(questionText = "") {
   const normalized = normalizePromptText(questionText);
-  const match = normalized.match(/point\s+([A-Za-z])?\s*\(([^)]+)\).*?direction(?:\s+vector)?\s*[A-Za-z]?\s*=\s*\(([^)]+)\)/i);
-  if (!match) return null;
-  const label = match[1] || "P";
-  const point = parseVector(match[2]);
-  const direction = parseVector(match[3]);
-  if (!point || !direction) return null;
-  return { label, point, direction };
+  const patterns = [
+    /point\s+([A-Za-z])?\s*\(([^)]+)\).*?direction(?:\s+vector)?\s*[A-Za-z]?\s*=\s*\(([^)]+)\)/i,
+    /passes\s+through\s+(?:the\s+)?point\s+([A-Za-z])?\s*\(([^)]+)\).*?direction(?:\s+of)?(?:\s+the)?(?:\s+vector)?\s*\(([^)]+)\)/i,
+    /passes\s+through\s+(?:the\s+)?point\s*\(([^)]+)\).*?direction(?:\s+of)?(?:\s+the)?(?:\s+vector)?\s*\(([^)]+)\)/i,
+    /point\s*\(([^)]+)\).*?direction(?:\s+of)?(?:\s+the)?(?:\s+vector)?\s*\(([^)]+)\)/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    if (!match) continue;
+
+    const hasLabel = match.length === 4;
+    const label = hasLabel ? (match[1] || "P") : "P";
+    const point = parseVector(hasLabel ? match[2] : match[1]);
+    const direction = parseVector(hasLabel ? match[3] : match[2]);
+    if (!point || !direction) continue;
+    return { label, point, direction };
+  }
+
+  return null;
 }
 
 export function parseDirectionVector(questionText = "") {

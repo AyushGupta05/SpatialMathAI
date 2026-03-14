@@ -146,7 +146,7 @@ export function createWorld(container) {
   }
 
   function lineRadius(size = 1) {
-    return Math.max(0.035, Number(size || 1) * 0.09);
+    return Math.max(0.012, Number(size || 1) * 0.22);
   }
 
   function normalizeLineEndpoints(start, end) {

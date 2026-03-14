@@ -7,10 +7,12 @@ function uniqueStrings(values = []) {
 }
 
 export function buildSourceEvidence(sourceSummary = {}) {
+  const rawDiagramSummary = typeof sourceSummary.diagramSummary === "string" ? sourceSummary.diagramSummary.trim() : "";
+  const diagramSummary = /^no diagram provided/i.test(rawDiagramSummary) ? "" : rawDiagramSummary;
   return {
     inputMode: sourceSummary.inputMode || "text",
     givens: uniqueStrings(sourceSummary.givens || []),
-    diagramSummary: typeof sourceSummary.diagramSummary === "string" ? sourceSummary.diagramSummary : "",
+    diagramSummary,
     conflicts: uniqueStrings(sourceSummary.conflicts || []),
   };
 }
