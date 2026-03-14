@@ -415,9 +415,9 @@ export function bootstrapApp() {
     if (!mesh?.material) return;
     const baseOpacity = mesh.userData?.baseOpacity ?? (mesh.userData?.shape === "plane" ? 0.72 : 0.9);
     const faded = Boolean(mesh.userData?.containsNestedObject);
-    mesh.material.transparent = true;
+    mesh.material.transparent = faded || baseOpacity < 0.995;
     mesh.material.opacity = faded ? Math.min(baseOpacity, 0.38) : baseOpacity;
-    mesh.material.depthWrite = !faded;
+    mesh.material.depthWrite = !mesh.material.transparent;
     if (mesh.material.emissive) {
       const baseEmissive = mesh.userData?.baseEmissive ?? mesh.material.emissive.getHex();
       mesh.material.emissive.setHex(mesh === activeMesh ? 0xffc857 : baseEmissive);
@@ -1679,9 +1679,9 @@ export function bootstrapApp() {
     if (!base) return;
 
     mesh.userData.containsNestedObject = Boolean(faded);
-    mesh.material.transparent = true;
+    mesh.material.transparent = faded || base.opacity < 0.995;
     mesh.material.opacity = faded ? Math.min(base.opacity, 0.38) : base.opacity;
-    mesh.material.depthWrite = faded ? false : base.depthWrite;
+    mesh.material.depthWrite = faded ? false : !mesh.material.transparent;
   }
 
   function refreshContainedObjectVisibility() {

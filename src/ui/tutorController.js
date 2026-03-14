@@ -14,7 +14,11 @@ import { tutorState } from "../state/tutorState.js";
 import { initUnfoldDrawer, syncUnfoldDrawer } from "./unfoldDrawer.js";
 import { MicrophoneCapture } from "./microphoneCapture.js";
 import { extractPastedQuestionImageFile } from "./questionImage.js";
-import { buildSuggestedQuestionActions, isStandaloneMathProblem } from "./tutorConversation.js";
+import {
+  buildSuggestedQuestionActions,
+  isStandaloneMathProblem,
+  normalizeTutorReplyText,
+} from "./tutorConversation.js";
 
 let world = null;
 let sceneApi = null;
@@ -160,10 +164,57 @@ function transcriptMessageTextNode(message) {
   return message?.querySelector(".chat-msg-text") || null;
 }
 
-function setTranscriptMessageText(message, content) {
+function formatChatInlineHtml(content = "") {
+  return escapeHtml(content).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+}
+
+function renderChatMessageHtml(content = "", options = {}) {
+  const role = options.role || "tutor";
+  const normalized = role === "tutor"
+    ? normalizeTutorReplyText(content, { completion: options.completion })
+    : String(content || "").replace(/\r\n?/g, "\n").trim();
+
+  if (!normalized) {
+    return `<p class="chat-msg-paragraph"></p>`;
+  }
+
+  const lines = normalized.split("\n");
+  const blocks = [];
+  let listItems = [];
+
+  const flushList = () => {
+    if (!listItems.length) return;
+    blocks.push(`<ul class="chat-msg-list">${listItems.join("")}</ul>`);
+    listItems = [];
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) {
+      flushList();
+      continue;
+    }
+
+    const bulletMatch = line.match(/^[-*]\s+(.+)$/);
+    if (bulletMatch) {
+      listItems.push(`<li>${formatChatInlineHtml(bulletMatch[1])}</li>`);
+      continue;
+    }
+
+    flushList();
+    blocks.push(`<p class="chat-msg-paragraph">${formatChatInlineHtml(line)}</p>`);
+  }
+
+  flushList();
+  return blocks.join("");
+}
+
+function setTranscriptMessageText(message, content, options = {}) {
   const node = transcriptMessageTextNode(message);
   if (node) {
-    node.textContent = content;
+    const role = options.role || message?.dataset?.role || "tutor";
+    const completion = options.completion ?? message?.dataset?.completion === "true";
+    node.innerHTML = renderChatMessageHtml(content, { role, completion });
   }
 }
 
@@ -191,13 +242,18 @@ function addTranscriptMessage(role, content, options = {}) {
 
   const message = document.createElement("div");
   message.className = `chat-msg is-${role}`;
+  message.dataset.role = role;
+  message.dataset.completion = options.completion ? "true" : "false";
 
   const bubble = document.createElement("div");
   bubble.className = "chat-msg-bubble";
 
-  const text = document.createElement("p");
+  const text = document.createElement("div");
   text.className = "chat-msg-text";
-  text.textContent = content;
+  text.innerHTML = renderChatMessageHtml(content, {
+    role,
+    completion: Boolean(options.completion),
+  });
 
   bubble.appendChild(text);
   message.appendChild(bubble);
@@ -1228,7 +1284,7 @@ async function sendTutorMessage(messageText, options = {}) {
       onChunk: (chunk) => {
         streamedText += chunk;
         typing?.classList.remove("loading-dots");
-        setTranscriptMessageText(typing, streamedText);
+        setTranscriptMessageText(typing, streamedText, { role: "tutor", completion: false });
       },
       onAssessment: (assessment) => {
         tutorState.setAssessment(assessment);
@@ -1239,7 +1295,13 @@ async function sendTutorMessage(messageText, options = {}) {
     });
 
     typing?.classList.remove("loading-dots");
-    setTranscriptMessageText(typing, response.text || streamedText || "I could not generate a tutor reply.");
+    if (typing) {
+      typing.dataset.completion = response.completionState?.complete ? "true" : "false";
+    }
+    setTranscriptMessageText(typing, response.text || streamedText || "I could not generate a tutor reply.", {
+      role: "tutor",
+      completion: Boolean(response.completionState?.complete),
+    });
     syncStepFromTutorResponse(response, plan);
 
     if (response.completionState?.complete) {
@@ -1281,7 +1343,7 @@ async function sendTutorMessage(messageText, options = {}) {
     }
   } catch (error) {
     typing?.classList.remove("loading-dots");
-    setTranscriptMessageText(typing, `Error: ${error.message}`);
+    setTranscriptMessageText(typing, `Error: ${error.message}`, { role: "tutor", completion: false });
   }
 }
 

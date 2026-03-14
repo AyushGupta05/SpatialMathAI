@@ -20,6 +20,17 @@ export function normalizePromptText(value = "") {
     .replaceAll("₇", "7")
     .replaceAll("₈", "8")
     .replaceAll("₉", "9")
+    .replaceAll("\u27e8", "(")
+    .replaceAll("\u27e9", ")")
+    .replaceAll("\u3008", "(")
+    .replaceAll("\u3009", ")")
+    .replaceAll("\u2329", "(")
+    .replaceAll("\u232a", ")")
+    .replaceAll("〈", "(")
+    .replaceAll("〉", ")")
+    .replaceAll("⟨", "(")
+    .replaceAll("⟩", ")")
+    .replace(/<\s*([-+\d.,\s]+)\s*>/g, "($1)")
     .replace(/\s+/g, " ")
     .trim();
 }

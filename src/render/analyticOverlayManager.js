@@ -1,9 +1,22 @@
 import * as THREE from "three";
 import { CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
 
-function cssLabel(text, style = "annotation") {
+const LABEL_STACK_PATTERNS = [
+  [0, 0, 0],
+  [0.42, 0.34, 0.08],
+  [-0.38, 0.64, 0.12],
+  [0.58, 0.94, -0.08],
+  [-0.54, 1.2, 0.18],
+  [0.7, 1.46, 0.1],
+];
+
+function cssLabel(text, style = "annotation", modifiers = []) {
   const element = document.createElement("div");
-  element.className = `scene-label scene-label--${style}`;
+  element.className = [
+    "scene-label",
+    `scene-label--${style}`,
+    ...modifiers.map((modifier) => `scene-label--${modifier}`),
+  ].join(" ");
   element.textContent = text;
   return new CSS2DObject(element);
 }
@@ -27,6 +40,7 @@ export class AnalyticOverlayManager {
     this.world = world;
     this.sceneApi = sceneApi;
     this.entries = [];
+    this.labelAnchors = [];
   }
 
   clear() {
@@ -47,6 +61,7 @@ export class AnalyticOverlayManager {
     if (!plan?.sceneOverlays?.length) return;
     if (Array.isArray(visibleOverlayIds) && visibleOverlayIds.length === 0) return;
 
+    this.labelAnchors = [];
     const allowed = new Set(visibleOverlayIds || []);
     for (const overlay of plan.sceneOverlays) {
       if (allowed.size && !allowed.has(overlay.id)) continue;
@@ -73,6 +88,58 @@ export class AnalyticOverlayManager {
     }
   }
 
+  #labelModifiersForOverlay(overlay = {}) {
+    const modifiers = new Set();
+    const overlayId = String(overlay.id || "").toLowerCase();
+    const targetId = String(overlay.targetObjectId || "").toLowerCase();
+    const text = String(overlay.text || "").toLowerCase();
+
+    if (overlay.type === "arrow") modifiers.add("callout");
+    if (overlayId.includes("normal") || targetId.includes("normal") || /^\s*n\s*=/.test(text)) {
+      modifiers.add("normal");
+    }
+    if (overlayId.includes("intersection") || targetId.includes("intersection") || text.includes("intersection")) {
+      modifiers.add("intersection");
+    }
+    if (overlayId.includes("anchor") || targetId.includes("anchor")) {
+      modifiers.add("anchor");
+    }
+    return [...modifiers];
+  }
+
+  #labelSpacingForOverlay(overlay = {}) {
+    const modifiers = this.#labelModifiersForOverlay(overlay);
+    if (modifiers.includes("intersection")) return 0.92;
+    if (modifiers.includes("normal")) return 0.84;
+    if (overlay.type === "arrow") return 1.08;
+    if (overlay.type === "text") return 0.88;
+    return 0.76;
+  }
+
+  #resolveLabelPosition(anchor, overlay) {
+    const minimumSpacing = this.#labelSpacingForOverlay(overlay);
+    const candidates = LABEL_STACK_PATTERNS.map((pattern) =>
+      anchor.clone().add(new THREE.Vector3(...pattern))
+    );
+
+    for (const candidate of candidates) {
+      const collides = this.labelAnchors.some((entry) => entry.distanceTo(candidate) < minimumSpacing);
+      if (!collides) {
+        this.labelAnchors.push(candidate.clone());
+        return candidate;
+      }
+    }
+
+    const fallback = anchor.clone().add(new THREE.Vector3(0, minimumSpacing * 1.8, 0.18));
+    this.labelAnchors.push(fallback.clone());
+    return fallback;
+  }
+
+  #attachLabel(group, label, anchor, overlay) {
+    label.position.copy(this.#resolveLabelPosition(anchor, overlay));
+    group.add(label);
+  }
+
   #anchorForObject(objectId, offset = [0, 0, 0]) {
     const objectSpec = this.sceneApi?.getObject?.(objectId);
     if (!objectSpec) return null;
@@ -86,18 +153,17 @@ export class AnalyticOverlayManager {
     const anchor = this.#anchorForObject(overlay.targetObjectId, overlay.offset || [0, 0, 0]);
     if (!anchor) return null;
     const group = new THREE.Group();
-    const label = cssLabel(overlay.text, overlay.style || "annotation");
-    label.position.copy(anchor);
-    group.add(label);
+    const label = cssLabel(overlay.text, overlay.style || "annotation", this.#labelModifiersForOverlay(overlay));
+    this.#attachLabel(group, label, anchor, overlay);
     return group;
   }
 
   #createTextLabel(overlay) {
     if (!Array.isArray(overlay.position)) return null;
     const group = new THREE.Group();
-    const label = cssLabel(overlay.text, overlay.style || "annotation");
-    label.position.set(overlay.position[0], overlay.position[1], overlay.position[2]);
-    group.add(label);
+    const anchor = new THREE.Vector3(overlay.position[0], overlay.position[1], overlay.position[2]);
+    const label = cssLabel(overlay.text, overlay.style || "annotation", this.#labelModifiersForOverlay(overlay));
+    this.#attachLabel(group, label, anchor, overlay);
     return group;
   }
 
@@ -113,10 +179,9 @@ export class AnalyticOverlayManager {
     const arrow = new THREE.ArrowHelper(direction, origin, length, color, Math.max(0.25, length * 0.16), Math.max(0.16, length * 0.12));
     group.add(arrow);
     if (overlay.text) {
-      const label = cssLabel(overlay.text, overlay.style || "annotation");
+      const label = cssLabel(overlay.text, overlay.style || "annotation", this.#labelModifiersForOverlay(overlay));
       const labelPoint = midpoint(origin, target).add(new THREE.Vector3(0, 0.35, 0));
-      label.position.copy(labelPoint);
-      group.add(label);
+      this.#attachLabel(group, label, labelPoint, overlay);
     }
     return group;
   }

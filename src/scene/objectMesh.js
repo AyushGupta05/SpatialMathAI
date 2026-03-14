@@ -4,19 +4,116 @@ import {
   normalizeSceneObject,
   paramsToBaseSize,
 } from "./schema.js";
+import {
+  sceneObjectBaseOpacity,
+  shouldAccentIntersectionPoint,
+  shouldAccentNormalLine,
+} from "./sceneVisuals.js";
 
-function buildMaterial(color, opacity = 0.9) {
+const OPAQUE_OPACITY_THRESHOLD = 0.995;
+
+function isOpaque(opacity = 1) {
+  return Number(opacity || 0) >= OPAQUE_OPACITY_THRESHOLD;
+}
+
+function applyMaterialOpacity(material, opacity = 1, forceTransparent = false) {
+  const transparent = forceTransparent || !isOpaque(opacity);
+  material.transparent = transparent;
+  material.opacity = opacity;
+  material.depthWrite = !transparent;
+  return material;
+}
+
+function disposeChild(child) {
+  child.geometry?.dispose?.();
+  if (Array.isArray(child.material)) {
+    child.material.forEach((material) => material?.dispose?.());
+  } else {
+    child.material?.dispose?.();
+  }
+}
+
+function clearMeshDecorations(mesh) {
+  if (!mesh?.children?.length) return;
+  const decorations = mesh.children.filter((child) => child.userData?.isSceneDecoration);
+  for (const child of decorations) {
+    mesh.remove(child);
+    disposeChild(child);
+  }
+}
+
+function addIntersectionAccent(mesh, spec) {
+  const radius = Math.max(0.1, Number(spec.params?.radius || 0.12));
+  const color = new THREE.Color(spec.color || "#ffd966");
+
+  const halo = new THREE.Mesh(
+    new THREE.SphereGeometry(radius * 1.9, 22, 18),
+    new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.16,
+      depthWrite: false,
+    })
+  );
+  halo.userData.isSceneDecoration = true;
+
+  const shell = new THREE.Mesh(
+    new THREE.SphereGeometry(radius * 1.35, 18, 14),
+    new THREE.MeshBasicMaterial({
+      color: "#fff4b0",
+      wireframe: true,
+      transparent: true,
+      opacity: 0.72,
+      depthWrite: false,
+    })
+  );
+  shell.userData.isSceneDecoration = true;
+
+  mesh.add(halo, shell);
+}
+
+function addNormalAccent(mesh, spec) {
+  const start = new THREE.Vector3(...spec.params.start);
+  const end = new THREE.Vector3(...spec.params.end);
+  const length = Math.max(0.2, start.distanceTo(end));
+  const thickness = Math.max(0.05, Number(spec.params?.thickness || 0.06));
+
+  const arrowHead = new THREE.Mesh(
+    new THREE.ConeGeometry(thickness * 2.8, Math.max(0.24, length * 0.16), 18),
+    new THREE.MeshStandardMaterial({
+      color: "#ffe38f",
+      emissive: new THREE.Color("#ffe38f").multiplyScalar(0.22),
+      emissiveIntensity: 0.58,
+      roughness: 0.18,
+      metalness: 0.08,
+    })
+  );
+  arrowHead.userData.isSceneDecoration = true;
+  arrowHead.position.set(0, (length * 0.5) + (arrowHead.geometry.parameters.height * 0.15), 0);
+  mesh.add(arrowHead);
+}
+
+function applyMeshDecorations(mesh, spec) {
+  clearMeshDecorations(mesh);
+
+  if (shouldAccentIntersectionPoint(spec)) {
+    addIntersectionAccent(mesh, spec);
+  }
+  if (shouldAccentNormalLine(spec)) {
+    addNormalAccent(mesh, spec);
+  }
+}
+
+function buildMaterial(color, opacity = 1) {
   const tone = new THREE.Color(color);
-  return new THREE.MeshStandardMaterial({
+  return applyMaterialOpacity(new THREE.MeshStandardMaterial({
     color: tone,
     roughness: 0.24,
     metalness: 0.08,
     emissive: tone.clone().multiplyScalar(0.12),
     emissiveIntensity: 0.38,
-    transparent: true,
-    opacity,
     side: THREE.DoubleSide,
-  });
+  }), opacity);
 }
 
 function lineRadius(thickness = 0.08) {
@@ -66,27 +163,28 @@ export function buildMeshFromSceneObject(world, objectSpec) {
 }
 
 function createMeshForShape(world, spec) {
+  const opacity = sceneObjectBaseOpacity(spec);
   switch (spec.shape) {
     case "cube":
-      return new THREE.Mesh(new THREE.BoxGeometry(spec.params.size, spec.params.size, spec.params.size), buildMaterial(spec.color));
+      return new THREE.Mesh(new THREE.BoxGeometry(spec.params.size, spec.params.size, spec.params.size), buildMaterial(spec.color, opacity));
     case "cuboid":
-      return new THREE.Mesh(new THREE.BoxGeometry(spec.params.width, spec.params.height, spec.params.depth), buildMaterial(spec.color));
+      return new THREE.Mesh(new THREE.BoxGeometry(spec.params.width, spec.params.height, spec.params.depth), buildMaterial(spec.color, opacity));
     case "sphere":
-      return new THREE.Mesh(new THREE.SphereGeometry(spec.params.radius, 28, 20), buildMaterial(spec.color));
+      return new THREE.Mesh(new THREE.SphereGeometry(spec.params.radius, 28, 20), buildMaterial(spec.color, opacity));
     case "cylinder":
-      return new THREE.Mesh(new THREE.CylinderGeometry(spec.params.radius, spec.params.radius, spec.params.height, 32), buildMaterial(spec.color));
+      return new THREE.Mesh(new THREE.CylinderGeometry(spec.params.radius, spec.params.radius, spec.params.height, 32), buildMaterial(spec.color, opacity));
     case "cone":
-      return new THREE.Mesh(new THREE.ConeGeometry(spec.params.radius, spec.params.height, 32), buildMaterial(spec.color));
+      return new THREE.Mesh(new THREE.ConeGeometry(spec.params.radius, spec.params.height, 32), buildMaterial(spec.color, opacity));
     case "pyramid":
-      return new THREE.Mesh(new THREE.ConeGeometry(spec.params.base / Math.sqrt(2), spec.params.height, 4), buildMaterial(spec.color));
+      return new THREE.Mesh(new THREE.ConeGeometry(spec.params.base / Math.sqrt(2), spec.params.height, 4), buildMaterial(spec.color, opacity));
     case "plane":
-      return new THREE.Mesh(new THREE.PlaneGeometry(spec.params.width, spec.params.depth), buildMaterial(spec.color, 0.28));
+      return new THREE.Mesh(new THREE.PlaneGeometry(spec.params.width, spec.params.depth), buildMaterial(spec.color, opacity));
     case "pointMarker":
-      return new THREE.Mesh(new THREE.SphereGeometry(spec.params.radius, 16, 12), buildMaterial(spec.color));
+      return new THREE.Mesh(new THREE.SphereGeometry(spec.params.radius, 16, 12), buildMaterial(spec.color, opacity));
     case "line":
       return buildLineMesh(world, spec.params, spec.color);
     default:
-      return new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), buildMaterial(spec.color));
+      return new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), buildMaterial(spec.color, opacity));
   }
 }
 
@@ -132,12 +230,15 @@ export function applySceneObjectToMesh(world, mesh, objectSpec) {
   mesh.userData.sceneParams = structuredClone(spec.params);
   mesh.userData.sceneMetadata = { ...spec.metadata };
   mesh.userData.baseSize = paramsToBaseSize(spec.shape, spec.params);
-  mesh.userData.baseOpacity = spec.shape === "plane" ? 0.28 : 0.9;
+  mesh.userData.baseOpacity = sceneObjectBaseOpacity(spec);
   mesh.userData.floorLocked = spec.shape !== "line" && spec.shape !== "plane";
   if (spec.shape === "line") {
     mesh.userData.lineStart = [...spec.params.start];
     mesh.userData.lineEnd = [...spec.params.end];
   }
+
+  applyMaterialOpacity(mesh.material, mesh.userData.baseOpacity);
+  applyMeshDecorations(mesh, spec);
 
   mesh.geometry.computeBoundingBox?.();
   const bbox = new THREE.Box3().setFromObject(mesh);
@@ -238,10 +339,5 @@ export function sceneObjectFromMesh(mesh) {
 export function disposeSceneMesh(world, mesh) {
   if (!mesh) return;
   world?.scene?.remove?.(mesh);
-  mesh.geometry?.dispose?.();
-  if (Array.isArray(mesh.material)) {
-    mesh.material.forEach((material) => material?.dispose?.());
-  } else {
-    mesh.material?.dispose?.();
-  }
+  mesh.traverse((child) => disposeChild(child));
 }

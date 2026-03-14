@@ -5,6 +5,7 @@ import {
   buildSuggestedQuestionActions,
   isStandaloneMathProblem,
   looksLikeShortFollowUp,
+  normalizeTutorReplyText,
 } from "../src/ui/tutorConversation.js";
 
 test("looksLikeShortFollowUp recognizes short post-solution follow-ups", () => {
@@ -36,4 +37,16 @@ test("buildSuggestedQuestionActions converts similar prompts into lesson-start a
       source: "template",
     },
   }]);
+});
+
+test("normalizeTutorReplyText converts solved replies into a clean heading and bullets", () => {
+  const normalized = normalizeTutorReplyText("**Correct!** That's the acute angle between the line and the plane. Notice how the line leans almost parallel to the plane. What do you notice about the normal?", {
+    completion: true,
+  });
+
+  assert.equal(normalized, [
+    "**Correct!**",
+    "- That's the acute angle between the line and the plane.",
+    "- Notice how the line leans almost parallel to the plane.",
+  ].join("\n"));
 });

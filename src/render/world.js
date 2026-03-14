@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
 export function createWorld(container) {
+  const OPAQUE_OPACITY_THRESHOLD = 0.995;
   const DEFAULT_CAMERA_POS = new THREE.Vector3(16, 10.5, -16);
   const DEFAULT_TARGET = new THREE.Vector3(0, 0, 0);
 
@@ -132,17 +133,19 @@ export function createWorld(container) {
   const lineUp = new THREE.Vector3(0, 1, 0);
   const cameraForward = new THREE.Vector3();
 
-  function buildMaterial(color) {
+  function buildMaterial(color, opacity = 1) {
     const tone = new THREE.Color(color);
-    return new THREE.MeshStandardMaterial({
+    const material = new THREE.MeshStandardMaterial({
       color: tone,
       roughness: 0.24,
       metalness: 0.08,
       emissive: tone.clone().multiplyScalar(0.12),
       emissiveIntensity: 0.38,
-      transparent: true,
-      opacity: 0.9,
     });
+    material.transparent = opacity < OPAQUE_OPACITY_THRESHOLD;
+    material.opacity = opacity;
+    material.depthWrite = !material.transparent;
+    return material;
   }
 
   function lineRadius(size = 1) {
@@ -295,7 +298,6 @@ export function createWorld(container) {
     mesh.position.y = type === "plane" ? 0 : halfHeight;
     if (type === "plane") {
       mesh.rotation.x = -Math.PI / 2;
-      mesh.material.opacity = 0.72;
     }
     return mesh;
   }

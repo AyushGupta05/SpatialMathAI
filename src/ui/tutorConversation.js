@@ -2,6 +2,14 @@ function normalizeText(value = "") {
   return String(value || "").trim();
 }
 
+function sentenceChunks(text = "") {
+  return normalizeText(text)
+    .replace(/\s+/g, " ")
+    .match(/[^.!?]+[.!?]?/g)
+    ?.map((part) => part.trim())
+    .filter(Boolean) || [];
+}
+
 const SHORT_FOLLOW_UP_PATTERNS = [
   /^(why|how so|what changed)\??$/i,
   /^(show|give)\s+(me\s+)?(the\s+)?formula\??$/i,
@@ -43,4 +51,32 @@ export function buildSuggestedQuestionActions(suggestions = []) {
       source: suggestion.source || "template",
     },
     }));
+}
+
+export function normalizeTutorReplyText(text = "", options = {}) {
+  const normalized = String(text || "").replace(/\r\n?/g, "\n").trim();
+  if (!normalized) return "";
+  if (!options.completion) return normalized;
+  if (/\n\s*[-*]\s+/.test(normalized)) return normalized;
+
+  const headingMatch = normalized.match(/^(\*\*[^*]+\*\*|Correct!?\.?)(?:\s+|$)([\s\S]*)$/i);
+  if (!headingMatch) {
+    const sentences = sentenceChunks(normalized);
+    if (sentences.length <= 1) return normalized;
+    return sentences.map((sentence, index) => (index === 0 ? sentence : `- ${sentence}`)).join("\n");
+  }
+
+  const heading = headingMatch[1].trim();
+  const body = headingMatch[2].trim();
+  const sentences = sentenceChunks(body);
+  const filtered = sentences.filter((sentence, index) => {
+    if (index !== sentences.length - 1) return true;
+    return !/\?\s*$/.test(sentence);
+  });
+  if (!filtered.length) return heading;
+
+  return [
+    heading,
+    ...filtered.map((sentence) => `- ${sentence}`),
+  ].join("\n");
 }
