@@ -64,6 +64,10 @@ export function createTutorRoute({ streamModel = converseNovaStream, freeformTur
         if (messages.length && messages[messages.length - 1].role === role) continue;
         messages.push({ role, content: [{ text: String(message.content || "") }] });
       }
+      // Ensure the conversation starts with a user message (Bedrock requirement)
+      while (messages.length && messages[0].role !== "user") {
+        messages.shift();
+      }
       if (!messages.length || messages[messages.length - 1].role !== "user") {
         messages.push({ role: "user", content: [{ text: userMessage }] });
       } else {

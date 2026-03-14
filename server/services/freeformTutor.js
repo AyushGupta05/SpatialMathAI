@@ -496,6 +496,13 @@ function freeformFallbackReply(sceneSnapshot = {}, sceneContext = {}, userMessag
   if (selection && /\b(explain|what is|what's happening|why)\b/.test(lower)) {
     return `${selection.label} is a ${selection.shape} with volume ${formatNumber(selection.metrics?.volume)} and surface area ${formatNumber(selection.metrics?.surfaceArea)}. What relationship do you want to inspect around it?`;
   }
+
+  // For conversational or educational questions, give a helpful reply instead of scene-centric defaults
+  const isQuestion = /\b(what|how|why|where|when|who|can you|could you|tell me|explain|describe|is it|are there|do you)\b/.test(lower);
+  if (isQuestion && !shouldAskModelForSceneCommand(userMessage)) {
+    return "I'm having trouble reaching my AI backend right now. Try again in a moment, or ask me to build a scene — I can handle that offline!";
+  }
+
   if (!objectCount) {
     return "The scene is blank right now. Ask me to build something, explain a concept, or say 'show me something cool.'";
   }
@@ -514,13 +521,22 @@ function buildModelMessages(sceneSnapshot = {}, sceneContext = {}, learningState
     if (!["user", "assistant"].includes(role)) continue;
     const content = String(message.content || "").trim();
     if (!content) continue;
+    // Skip consecutive messages with the same role to satisfy Bedrock alternation requirement
+    if (messages.length && messages[messages.length - 1].role === role) continue;
     messages.push({ role, content: [{ text: content }] });
+  }
+
+  // Ensure the conversation starts with a user message (Bedrock requirement)
+  while (messages.length && messages[0].role !== "user") {
+    messages.shift();
   }
 
   const sceneSummary = summarizeScene(sceneSnapshot, sceneContext);
   const selected = selectedObjectSummary(sceneSnapshot, sceneContext);
 
-  messages.push({
+  // If the last message is already "user", replace it with the enriched user message;
+  // otherwise append as a new user message.
+  const userContent = {
     role: "user",
     content: [{
       text: [
@@ -535,7 +551,13 @@ function buildModelMessages(sceneSnapshot = {}, sceneContext = {}, learningState
         "If the user did not ask for a scene edit, return sceneCommand as null.",
       ].join("\n"),
     }],
-  });
+  };
+
+  if (messages.length && messages[messages.length - 1].role === "user") {
+    messages[messages.length - 1] = userContent;
+  } else {
+    messages.push(userContent);
+  }
 
   return messages;
 }
