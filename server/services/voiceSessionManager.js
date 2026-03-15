@@ -260,9 +260,6 @@ export function createVoiceSessionManager(deps = {}) {
       } else {
         turn.assistantPreviewText = delta.content;
       }
-      if (turn.mode === "coach") {
-        return;
-      }
       setState(session, "responding");
       publish(session, {
         type: "assistant_text",
@@ -275,9 +272,6 @@ export function createVoiceSessionManager(deps = {}) {
 
     if (delta.type === "assistant_audio") {
       turn.assistantAudioReceived = true;
-      if (turn.mode === "coach") {
-        return;
-      }
       setState(session, "responding");
       publish(session, {
         type: "assistant_audio",
@@ -294,13 +288,19 @@ export function createVoiceSessionManager(deps = {}) {
       return null;
     }
 
+    const nativeAssistantText = safeContent(assistantTextOverride);
+    const hasNativeAssistantText = Boolean(nativeAssistantText);
+    const hasNativeAssistantAudio = Boolean(turn.assistantAudioReceived);
+    const hasNativeAssistantReply = Boolean(hasNativeAssistantText || hasNativeAssistantAudio);
+
     const recovered = await recoverVoiceReply({
       inputTranscript,
-      assistantTextOverride,
+      assistantTextOverride: nativeAssistantText,
       mode: turn.mode,
       context: turn.context,
       session: session.conversation,
       voiceId: turn.voiceId,
+      suppressAudio: hasNativeAssistantAudio,
     }).catch((error) => {
       console.warn("Voice recovery fallback:", error?.message || error);
       return null;
@@ -311,7 +311,8 @@ export function createVoiceSessionManager(deps = {}) {
     }
 
     setState(session, "responding");
-    if (recovered.assistantText !== assistantTextOverride || turn.mode === "coach") {
+    const shouldPublishRecoveredText = !hasNativeAssistantText;
+    if (shouldPublishRecoveredText) {
       publish(session, {
         type: "assistant_text",
         content: recovered.assistantText,
@@ -320,20 +321,22 @@ export function createVoiceSessionManager(deps = {}) {
       });
     }
 
-    for (const audioBase64 of recovered.audioChunks || []) {
-      publish(session, {
-        type: "assistant_audio",
-        audioBase64,
-        sampleRateHertz: recovered.sampleRateHertz,
-        generationStage: "FINAL",
-      });
+    if (!hasNativeAssistantAudio) {
+      for (const audioBase64 of recovered.audioChunks || []) {
+        publish(session, {
+          type: "assistant_audio",
+          audioBase64,
+          sampleRateHertz: recovered.sampleRateHertz,
+          generationStage: "FINAL",
+        });
+      }
     }
 
     return {
-      assistantText: recovered.assistantText,
+      assistantText: nativeAssistantText || recovered.assistantText,
       inputTranscript,
-      fallbackUsed: Boolean(recovered.fallbackUsed),
-      source: recovered.source,
+      fallbackUsed: Boolean(!hasNativeAssistantReply && recovered.fallbackUsed),
+      source: hasNativeAssistantReply ? "nova-sonic" : recovered.source,
       actions: Array.isArray(recovered.actions) ? recovered.actions : [],
       focusTargets: Array.isArray(recovered.focusTargets) ? recovered.focusTargets : [],
       checkpoint: recovered.checkpoint || null,

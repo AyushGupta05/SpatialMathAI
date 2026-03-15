@@ -13,7 +13,6 @@ import {
   buildVoiceFallback,
   chunkBuffer,
   DEFAULT_VOICE_ID,
-  OUTPUT_SAMPLE_RATE,
 } from "./voiceCommon.js";
 
 const GENERIC_VOICE_REPLY_SYSTEM_PROMPT = `You are Nova Prism, a spoken spatial-maths tutor.
@@ -21,6 +20,7 @@ const GENERIC_VOICE_REPLY_SYSTEM_PROMPT = `You are Nova Prism, a spoken spatial-
 - Be warm, concrete, and easy to follow.
 - Answer the user's question directly when you can.
 - If helpful, end with one short follow-up question.`;
+const POLLY_PCM_SAMPLE_RATE = 16000;
 
 const SPOKEN_TUTOR_APPENDIX = `
 Voice delivery rules:
@@ -106,7 +106,7 @@ function stripMarkdownForSpeech(text = "") {
   return String(text || "")
     .replace(/\r\n?/g, "\n")
     .split("\n")
-    .map((line) => line.replace(/^\s*[-*•]+\s*/, "").trim())
+    .map((line) => line.replace(/^\s*(?:-|\*)+\s*/, "").trim())
     .filter(Boolean)
     .join(" ")
     .replace(/\s+/g, " ")
@@ -141,7 +141,7 @@ async function synthesizeAssistantAudio({ assistantText = "", voiceId = null }) 
     const pollyResponse = await getPollyClient().send(new SynthesizeSpeechCommand({
       Engine: "neural",
       OutputFormat: "pcm",
-      SampleRate: String(OUTPUT_SAMPLE_RATE),
+      SampleRate: String(POLLY_PCM_SAMPLE_RATE),
       Text: assistantText,
       TextType: "text",
       VoiceId: normalizePollyVoiceId(voiceId || DEFAULT_VOICE_ID),
@@ -149,14 +149,14 @@ async function synthesizeAssistantAudio({ assistantText = "", voiceId = null }) 
     const audioBuffer = Buffer.from(await pollyResponse.AudioStream.transformToByteArray());
     return {
       audioChunks: chunkBuffer(audioBuffer).map((chunk) => chunk.toString("base64")),
-      sampleRateHertz: OUTPUT_SAMPLE_RATE,
+      sampleRateHertz: POLLY_PCM_SAMPLE_RATE,
       audioFallbackUsed: false,
     };
   } catch (error) {
     console.warn("Voice audio fallback:", error?.message || error);
     return {
       audioChunks: [],
-      sampleRateHertz: OUTPUT_SAMPLE_RATE,
+      sampleRateHertz: POLLY_PCM_SAMPLE_RATE,
       audioFallbackUsed: true,
     };
   }
@@ -311,7 +311,6 @@ ${SPOKEN_TUTOR_APPENDIX}`,
 
 async function generateCoachVoiceReply({
   context = null,
-  session = null,
   inputTranscript = "",
 }) {
   const userMessage = String(inputTranscript || "").trim();
@@ -350,7 +349,6 @@ async function generateCoachVoiceReply({
     learningState: context.learningState || {},
     contextStepId: context.contextStepId || null,
     userMessage,
-    session,
   });
 }
 
@@ -361,6 +359,7 @@ export async function generateRecoveredVoiceReply({
   context = null,
   session = null,
   voiceId = null,
+  suppressAudio = false,
 }) {
   const userMessage = String(inputTranscript || "").trim();
   const overriddenAssistantText = String(assistantTextOverride || "").trim();
@@ -369,17 +368,22 @@ export async function generateRecoveredVoiceReply({
   if (mode === "coach") {
     const structuredReply = await generateCoachVoiceReply({
       context,
-      session,
       inputTranscript: userMessage,
     });
     if (!structuredReply?.assistantText) {
       return null;
     }
 
-    const audio = await synthesizeAssistantAudio({
-      assistantText: structuredReply.assistantText,
-      voiceId,
-    });
+    const audio = suppressAudio
+      ? {
+        audioChunks: [],
+        sampleRateHertz: POLLY_PCM_SAMPLE_RATE,
+        audioFallbackUsed: false,
+      }
+      : await synthesizeAssistantAudio({
+        assistantText: structuredReply.assistantText,
+        voiceId,
+      });
 
     return {
       assistantText: structuredReply.assistantText,

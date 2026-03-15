@@ -156,6 +156,118 @@ test("voice session manager streams transcript, audio, and done events with mode
   subscription.close();
 });
 
+test("voice session manager keeps native Sonic coach audio and only uses recovery for metadata", async () => {
+  const manager = createVoiceSessionManager({
+    hasAwsCredentials: () => true,
+    getCapabilitySnapshot: () => ({ configured: true }),
+    getModelCandidateOrder: () => ["good-model"],
+    generateRecoveredVoiceReply: async ({ assistantTextOverride, suppressAudio, inputTranscript }) => ({
+      assistantText: `Recovered summary for ${inputTranscript}`,
+      audioChunks: [Buffer.from([9, 9, 9, 9]).toString("base64")],
+      sampleRateHertz: 16000,
+      source: "voice-guided",
+      fallbackUsed: false,
+      actions: [{ id: "formula", label: "Show Formula", kind: "show-formula", payload: {} }],
+      sceneCommand: {
+        summary: "Focus vector AB",
+        operations: [{ kind: "focus_objects", targetIds: ["AB"] }],
+      },
+      assistantTextOverride,
+      suppressAudio,
+    }),
+    startBidirectionalStream: async (_modelId, inputQueue) => (async function* fakeOutput() {
+      for await (const input of inputQueue) {
+        if (input?.event?.sessionEnd) {
+          break;
+        }
+      }
+
+      yield {
+        event: {
+          contentStart: {
+            contentId: "user-final",
+            role: "USER",
+            type: "TEXT",
+            additionalModelFields: JSON.stringify({ generationStage: "FINAL" }),
+          },
+        },
+      };
+      yield {
+        event: {
+          textOutput: {
+            contentId: "user-final",
+            content: "Can you show the angle?",
+          },
+        },
+      };
+      yield {
+        event: {
+          contentStart: {
+            contentId: "assistant-final",
+            role: "ASSISTANT",
+            type: "TEXT",
+            additionalModelFields: JSON.stringify({ generationStage: "FINAL" }),
+          },
+        },
+      };
+      yield {
+        event: {
+          textOutput: {
+            contentId: "assistant-final",
+            content: "Sure, look at the angle between AB and AC.",
+          },
+        },
+      };
+      yield {
+        event: {
+          contentStart: {
+            contentId: "assistant-audio",
+            role: "ASSISTANT",
+            type: "AUDIO",
+            additionalModelFields: JSON.stringify({ generationStage: "FINAL" }),
+          },
+        },
+      };
+      yield {
+        event: {
+          audioOutput: {
+            contentId: "assistant-audio",
+            content: Buffer.from([1, 2, 3, 4]).toString("base64"),
+            sampleRateHertz: 24000,
+          },
+        },
+      };
+    }()),
+  });
+
+  const session = manager.createSession();
+  const subscription = manager.subscribe(session.sessionId);
+  await subscription.next();
+
+  await manager.startTurn({
+    sessionId: session.sessionId,
+    mode: "coach",
+    context: {},
+    text: "Can you show the angle?",
+  });
+
+  const events = await collectUntil(subscription, (event) => event.type === "done");
+  const assistantAudioEvents = events.filter((event) => event.type === "assistant_audio");
+  const assistantTextEvents = events.filter((event) => event.type === "assistant_text");
+  const done = events.at(-1);
+
+  assert.equal(assistantAudioEvents.length, 1);
+  assert.equal(assistantAudioEvents[0].sampleRateHertz, 24000);
+  assert.equal(assistantTextEvents.at(-1).content, "Sure, look at the angle between AB and AC.");
+  assert.equal(done.assistantText, "Sure, look at the angle between AB and AC.");
+  assert.equal(done.fallbackUsed, false);
+  assert.equal(done.source, "nova-sonic");
+  assert.equal(done.actions[0].label, "Show Formula");
+  assert.equal(done.sceneCommand.summary, "Focus vector AB");
+
+  subscription.close();
+});
+
 test("voice session manager falls back to captions when credentials are unavailable", async () => {
   const manager = createVoiceSessionManager({
     hasAwsCredentials: () => false,
