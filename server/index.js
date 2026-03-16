@@ -69,11 +69,11 @@ const PORT = await findAvailablePort(DEFAULT_PORT);
 void warmLessonExemplars();
 
 if (PORT !== DEFAULT_PORT) {
-  console.warn(`Port ${DEFAULT_PORT} is busy, starting Nova Prism on ${PORT} instead.`);
+  console.warn(`Port ${DEFAULT_PORT} is busy, starting SpatialMath on ${PORT} instead.`);
 }
 
 serve({ fetch: app.fetch, port: PORT }, (info) => {
-  console.log(`Nova Prism server running at http://localhost:${info.port}`);
+  console.log(`SpatialMath server running at http://localhost:${info.port}`);
   console.log(`  API: http://localhost:${info.port}/api/health`);
   console.log(`  App: http://localhost:${info.port}/index.html`);
   console.log(`  AWS Region: ${process.env.AWS_REGION || "us-east-1"}`);

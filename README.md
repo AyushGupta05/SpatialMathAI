@@ -1,6 +1,6 @@
-# Nova Prism
+# SpatialMath — AI Spatial Reasoning Tutor
 
-Nova Prism turns flat spatial-maths prompts into interactive 3D lessons that students can inspect, manipulate, and talk to.
+SpatialMath turns flat spatial-maths prompts into interactive 3D lessons that students can inspect, manipulate, and talk to.
 
 The app is built for the Amazon Nova hackathon story:
 - `multimodal understanding`: combine text prompts and uploaded worksheet diagrams

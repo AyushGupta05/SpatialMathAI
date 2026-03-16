@@ -500,7 +500,7 @@ export function buildTutorSystemPrompt({ plan, sceneSnapshot, sceneContext, lear
   const learningStage = learningState?.learningStage || "orient";
   const learningMoment = normalizedPlan.learningMoments?.[learningStage] || {};
 
-  return `You are Nova Prism, a spatial-maths tutor inspired by 3Blue1Brown's visual teaching and Khan Academy's Socratic tutoring.
+  return `You are SpatialMath, a spatial-maths tutor inspired by 3Blue1Brown's visual teaching and Khan Academy's Socratic tutoring.
 
 Your core philosophy:
 - NEVER give the answer directly. Guide the learner to discover it themselves through the 3D scene.
@@ -646,7 +646,7 @@ export function buildFallbackTutorReply({ plan, assessment, sceneContext, userMe
   }
 
   if (liveChallenge?.unlocked && /(target|challenge|goal)/.test(lowerMessage)) {
-    return `The live ${liveChallenge.metric === "surfaceArea" ? "surface area" : "volume"} target is ${liveChallenge.targetValue ?? "not set yet"}. The current value is ${liveChallenge.currentValue ?? "unknown"} and Nova accepts about +/-${liveChallenge.toleranceValue ?? "0"} tolerance.`;
+    return `The live ${liveChallenge.metric === "surfaceArea" ? "surface area" : "volume"} target is ${liveChallenge.targetValue ?? "not set yet"}. The current value is ${liveChallenge.currentValue ?? "unknown"} and SpatialMath accepts about +/-${liveChallenge.toleranceValue ?? "0"} tolerance.`;
   }
 
   if (/(hint|next|stuck|help)/.test(lowerMessage)) {

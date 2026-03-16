@@ -7,7 +7,7 @@ import { cleanupJson } from "./plan/shared.js";
 import { converseWithModelFailover } from "./modelInvoker.js";
 import { hasAwsCredentials } from "./modelRouter.js";
 
-const FREEFORM_TUTOR_SYSTEM_PROMPT = `You are Nova Prism, a scene-aware chat companion inside a 3D spatial sandbox.
+const FREEFORM_TUTOR_SYSTEM_PROMPT = `You are SpatialMath, a scene-aware chat companion inside a 3D spatial sandbox.
 
 Return ONLY valid JSON with this exact structure:
 {

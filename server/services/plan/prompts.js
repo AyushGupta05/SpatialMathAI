@@ -31,7 +31,7 @@ Return ONLY valid JSON with this exact top-level structure:
   "problem": {
     "id": "string",
     "question": "string",
-    "questionType": "volume" | "surface_area" | "composite" | "spatial" | "comparison",
+    "questionType": "volume" | "surface_area" | "composite" | "spatial" | "comparison" | "short descriptive category",
     "summary": "string",
     "mode": "guided" | "manual"
   },
@@ -219,4 +219,5 @@ Rules:
 - For staged vector lessons, prefer coordinate grids, point labels, vector labels, and a formula card that explains how the visible objects map to the algebra.
 - When a line or vector is named by points such as AB or AC, its endpoints must match those point coordinates exactly rather than defaulting to the world origin.
 - Do not pre-bake only three hardcoded lesson types. Generalize from the question itself and invent the staged scene directly from the problem.
+- For unsupported topics outside the built-in geometry families, use a short descriptive "questionType" such as "system of linear equations" instead of forcing everything into "spatial".
 - Return JSON only.`;

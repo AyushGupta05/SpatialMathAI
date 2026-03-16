@@ -238,6 +238,9 @@ export class TutorState extends EventTarget {
   useHint() {
     if (this._state.hint_state.current_stage_hints >= this._state.hint_state.max_hints) return false;
     this._state.hint_state.current_stage_hints += 1;
+    if (this._state.hint_state.current_stage_hints >= this._state.hint_state.max_hints) {
+      this._state.hint_state.escalate_next = true;
+    }
     this._emit("hint", { hint_state: { ...this._state.hint_state } });
     return true;
   }

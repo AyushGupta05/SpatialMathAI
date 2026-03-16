@@ -334,6 +334,40 @@ export function resolveTutorActionState({
   };
 }
 
+export function resolveHintFollowUpActionState({
+  plan = {},
+  stage = null,
+  learningState = {},
+  completionState = null,
+} = {}) {
+  const derivedLearningState = cloneLearningState(learningState);
+  const stageType = stageTypeForContext(plan, stage, derivedLearningState);
+  const hintState = normalizeHintState(derivedLearningState?.hint_state || {});
+  const lastVerdict = currentVerdictEntry(derivedLearningState)?.verdict || null;
+
+  if (completionState?.complete) {
+    return {
+      stageType,
+      lastVerdict,
+      actions: actionsForCompletion(),
+    };
+  }
+
+  if (hintState.current_stage_hints > 0 || hintState.escalate_next) {
+    return {
+      stageType,
+      lastVerdict: "STUCK",
+      actions: actionsForStuck(plan, stage, derivedLearningState),
+    };
+  }
+
+  return {
+    stageType,
+    lastVerdict,
+    actions: initialActionsForStage(plan, stage, derivedLearningState),
+  };
+}
+
 export function formulaTextForCurrentStage(plan = {}, stage = null) {
   return stageFormulaText(plan, stage);
 }

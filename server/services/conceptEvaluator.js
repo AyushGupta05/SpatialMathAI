@@ -82,7 +82,7 @@ function normalizeVerdict(parsed = {}) {
 
   if (verdict === "CORRECT" && confidence < 0.75) {
     verdict = "PARTIAL";
-    gap = "Nova was uncertain — checking understanding";
+    gap = "SpatialMath was uncertain - checking understanding";
     scene_cue = null;
     console.log(`[eval] CORRECT→PARTIAL override, confidence=${confidence}`);
   }

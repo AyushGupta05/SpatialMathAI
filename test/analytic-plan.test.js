@@ -12,6 +12,11 @@ const linePlaneAngleBracketPrompt = "In three-dimensional space, a line L passes
 const skewLinesPrompt = "Two lines in space are given by r1 = (1,2,0) + t(2,-1,3), r2 = (4,-1,2) + s(1,2,-1). Find the shortest distance between the two skew lines.";
 const skewLinesUnicodePrompt = "Two lines in space are given by r₁ = (1, 2, 0) + t(2, -1, 3), r₂ = (4, -1, 2) + s(1, 2, -1). Find the shortest distance between the two skew lines.";
 const skewLinesUnlabeledPrompt = "Two lines in space are given by (1,2,0) + t(2,-1,3) and (4,-1,2) + s(1,2,-1). Find the shortest distance between the two skew lines.";
+const linearSystemPrompt = `Find the values of k for which the following system of equations has no solutions and the value of k for the system to have an infinite number of solutions.
+
+x - 3y + z = 3
+x + 5y - 2z = 1
+16y - 6z = k`;
 
 test("detectAnalyticSubtype recognizes supported analytic prompts", () => {
   assert.equal(detectAnalyticSubtype(linePlaneIntersectionPrompt), "line_plane_intersection");
@@ -21,6 +26,7 @@ test("detectAnalyticSubtype recognizes supported analytic prompts", () => {
   assert.equal(detectAnalyticSubtype(skewLinesPrompt), "skew_lines_distance");
   assert.equal(detectAnalyticSubtype(skewLinesUnicodePrompt), "skew_lines_distance");
   assert.equal(detectAnalyticSubtype(skewLinesUnlabeledPrompt), "skew_lines_distance");
+  assert.equal(detectAnalyticSubtype(linearSystemPrompt), "system_of_linear_equations");
 });
 
 test("buildAnalyticPlan creates an auto-rendered line-plane intersection lesson", () => {
@@ -128,4 +134,21 @@ test("buildAnalyticPlan accepts worksheet-style skew-lines prompts with unicode 
   assert.ok(plan);
   assert.equal(plan.analyticContext?.subtype, "skew_lines_distance");
   assert.equal(plan.sceneMoments[0].visibleObjectIds.length, 2);
+});
+
+test("buildAnalyticPlan creates a guided lesson for a parametric linear system", () => {
+  const plan = buildAnalyticPlan(linearSystemPrompt, {
+    cleanedQuestion: linearSystemPrompt,
+    inputMode: "text",
+  });
+
+  assert.ok(plan);
+  assert.equal(plan.experienceMode, "analytic_auto");
+  assert.equal(plan.problem.questionType, "system of linear equations");
+  assert.equal(plan.analyticContext?.subtype, "system_of_linear_equations");
+  assert.equal(plan.analyticContext?.derivedValues?.infiniteSolutions, "-4");
+  assert.equal(plan.analyticContext?.derivedValues?.noSolutionCondition, "k != -4");
+  assert.match(plan.answerScaffold.finalAnswer || "", /k = -4/i);
+  assert.ok(plan.sceneMoments.some((moment) => moment.visibleOverlayIds.some((id) => id.includes("linear-system-answer"))));
+  assert.ok(plan.objectSuggestions.some((item) => item.id === "analysis-board"));
 });

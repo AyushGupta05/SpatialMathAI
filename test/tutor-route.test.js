@@ -130,6 +130,189 @@ function buildAnalyticPlan({ revealFormula = false, revealFullSolution = false }
   });
 }
 
+function buildAnalyticProgressPlan() {
+  return normalizeScenePlan({
+    problem: {
+      question: "Find the angle between AB and AC.",
+      questionType: "spatial",
+      mode: "guided",
+    },
+    experienceMode: "analytic_auto",
+    answerScaffold: {
+      formula: "cos(theta) = (AB · AC) / (|AB||AC|)",
+    },
+    analyticContext: {
+      subtype: "vector_angle",
+      formulaCard: {
+        title: "Angle Between Vectors",
+        formula: "cos(theta) = (AB · AC) / (|AB||AC|)",
+        explanation: "Compare the two vectors from the same anchor.",
+      },
+      solutionSteps: [{
+        id: "solve",
+        title: "Use the dot product",
+        formula: "cos(theta) = (AB · AC) / (|AB||AC|)",
+        explanation: "Use the visible vectors.",
+      }],
+    },
+    objectSuggestions: [
+      {
+        id: "point-a",
+        title: "Point A",
+        object: {
+          id: "point-a-object",
+          shape: "pointMarker",
+          label: "A",
+          position: [1, 1, 0],
+          params: { radius: 0.1 },
+        },
+      },
+      {
+        id: "point-b",
+        title: "Point B",
+        object: {
+          id: "point-b-object",
+          shape: "pointMarker",
+          label: "B",
+          position: [5, 1, 0],
+          params: { radius: 0.1 },
+        },
+      },
+      {
+        id: "point-c",
+        title: "Point C",
+        object: {
+          id: "point-c-object",
+          shape: "pointMarker",
+          label: "C",
+          position: [1, 4, 0],
+          params: { radius: 0.1 },
+        },
+      },
+      {
+        id: "vector-ab",
+        title: "Vector AB",
+        object: {
+          id: "vector-ab-object",
+          shape: "line",
+          label: "AB",
+          params: { start: [1, 1, 0], end: [5, 1, 0], thickness: 0.06 },
+        },
+      },
+      {
+        id: "vector-ac",
+        title: "Vector AC",
+        object: {
+          id: "vector-ac-object",
+          shape: "line",
+          label: "AC",
+          params: { start: [1, 1, 0], end: [1, 4, 0], thickness: 0.06 },
+        },
+      },
+    ],
+    buildSteps: [
+      {
+        id: "plot-points",
+        title: "Plot the points",
+        instruction: "Read the plotted points.",
+        action: "observe",
+        suggestedObjectIds: ["point-a", "point-b", "point-c"],
+        requiredObjectIds: [],
+      },
+      {
+        id: "show-ab",
+        title: "Show AB",
+        instruction: "Reveal AB.",
+        action: "observe",
+        suggestedObjectIds: ["point-a", "point-b", "point-c", "vector-ab"],
+        requiredObjectIds: [],
+        highlightObjectIds: ["vector-ab-object"],
+      },
+      {
+        id: "show-ac",
+        title: "Show AC",
+        instruction: "Reveal AC.",
+        action: "observe",
+        suggestedObjectIds: ["point-a", "point-b", "point-c", "vector-ab", "vector-ac"],
+        requiredObjectIds: [],
+        highlightObjectIds: ["vector-ac-object"],
+      },
+    ],
+    lessonStages: [
+      {
+        id: "plot-points",
+        title: "Plot the points",
+        goal: "Read the coordinates.",
+        tutorIntro: "Start with the points.",
+        highlightTargets: ["point-a-object", "point-b-object", "point-c-object"],
+      },
+      {
+        id: "show-ab",
+        title: "Show AB",
+        goal: "Use AB.",
+        tutorIntro: "AB is now shown.",
+        highlightTargets: ["vector-ab-object"],
+      },
+      {
+        id: "show-ac",
+        title: "Show AC",
+        goal: "Use AC.",
+        tutorIntro: "AC is now shown.",
+        highlightTargets: ["vector-ac-object"],
+      },
+    ],
+    cameraBookmarks: [{
+      id: "overview",
+      label: "Overview",
+      position: [8, 6, 8],
+      target: [0, 0, 0],
+    }],
+    sceneMoments: [
+      {
+        id: "plot-points",
+        title: "Plot the points",
+        prompt: "The points are shown on the grid.",
+        goal: "Read the coordinates.",
+        focusTargets: ["point-a-object", "point-b-object", "point-c-object"],
+        visibleObjectIds: ["point-a", "point-b", "point-c"],
+        visibleOverlayIds: ["analytic-axes"],
+        cameraBookmarkId: "overview",
+        revealFormula: false,
+        revealFullSolution: false,
+      },
+      {
+        id: "show-ab",
+        title: "Show AB",
+        prompt: "AB is now shown.",
+        goal: "Use AB.",
+        focusTargets: ["vector-ab-object"],
+        visibleObjectIds: ["point-a", "point-b", "point-c", "vector-ab"],
+        visibleOverlayIds: ["analytic-axes"],
+        cameraBookmarkId: "overview",
+        revealFormula: false,
+        revealFullSolution: false,
+      },
+      {
+        id: "show-ac",
+        title: "Show AC",
+        prompt: "AC is now shown.",
+        goal: "Use AC.",
+        focusTargets: ["vector-ac-object"],
+        visibleObjectIds: ["point-a", "point-b", "point-c", "vector-ab", "vector-ac"],
+        visibleOverlayIds: ["analytic-axes"],
+        cameraBookmarkId: "overview",
+        revealFormula: true,
+        revealFullSolution: false,
+      },
+    ],
+    sceneOverlays: [{
+      id: "analytic-axes",
+      type: "coordinate-frame",
+      bounds: { x: [-4, 6], y: [-4, 6], z: [-4, 4], tickStep: 1 },
+    }],
+  });
+}
+
 function parseSsePayloads(bodyText) {
   return bodyText
     .split(/\r?\n/)
@@ -265,6 +448,44 @@ test("POST /api/tutor unlocks analytic formula actions when the current moment r
 
   assert.deepEqual(meta.actions.map((action) => action.id), ["show_hint", "show_formula"]);
   assert.equal(meta.actions[0].label, "Give me a hint");
+});
+
+test("POST /api/tutor advances analytic scene directives to the next moment after a correct answer", async () => {
+  const plan = buildAnalyticProgressPlan();
+  const tutorRoute = createTutorRoute({
+    streamModel: async function* streamTutor() {
+      yield "You found AB.";
+    },
+    conceptEvaluator: async () => ({
+      verdict: "CORRECT",
+      confidence: 0.98,
+      what_was_right: "Computed AB correctly",
+      gap: null,
+      misconception_type: null,
+      scene_cue: null,
+      tutor_tone: "encouraging",
+    }),
+  });
+
+  const response = await tutorRoute.request("/", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      plan,
+      sceneSnapshot: { objects: [], selectedObjectId: null },
+      learningState: { currentStep: 0, learningStage: "build", history: [] },
+      userMessage: "AB = (4, 0, 0)",
+      contextStepId: "plot-points",
+    }),
+  });
+
+  const payloads = parseSsePayloads(await response.text());
+  const meta = payloads.find((entry) => entry.type === "meta")?.content;
+
+  assert.equal(meta?.stageStatus?.currentStageId, "show-ab");
+  assert.equal(meta?.sceneDirective?.stageId, "show-ab");
+  assert.deepEqual(meta?.sceneDirective?.visibleObjectIds, ["point-a", "point-b", "point-c", "vector-ab"]);
+  assert.deepEqual(meta?.focusTargets, ["vector-ab-object"]);
 });
 
 test("POST /api/tutor exposes the solution action on analytic final reveal stages", async () => {

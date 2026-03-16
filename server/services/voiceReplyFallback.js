@@ -15,7 +15,7 @@ import {
   DEFAULT_VOICE_ID,
 } from "./voiceCommon.js";
 
-const GENERIC_VOICE_REPLY_SYSTEM_PROMPT = `You are Nova Prism, a spoken spatial-maths tutor.
+const GENERIC_VOICE_REPLY_SYSTEM_PROMPT = `You are SpatialMath, a spoken spatial-maths tutor.
 - Reply conversationally in 1-2 short sentences.
 - Be warm, concrete, and easy to follow.
 - Answer the user's question directly when you can.

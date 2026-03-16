@@ -28,7 +28,7 @@ function buildEvidencePanelHTML(data = {}) {
         style="max-width:120px;border-radius:4px"
         alt="uploaded diagram"
       />
-      <span class="badge badge-info">Nova read this image</span>
+      <span class="badge badge-info">SpatialMath read this image</span>
     `
     : `<span class="badge badge-muted">Text input</span>`;
 
@@ -38,7 +38,7 @@ function buildEvidencePanelHTML(data = {}) {
         ${imageMarkup}
       </div>
       <div class="evidence-panel-column">
-        <p class="label-muted">Nova extracted</p>
+        <p class="label-muted">SpatialMath extracted</p>
         <ul class="evidence-panel-list">
           ${renderList(data?.extracted?.givens || [])}
         </ul>

@@ -1,4 +1,4 @@
-# Nova Prism Validation Matrix
+# SpatialMath Validation Matrix
 
 Validation run captured on March 14, 2026.
 

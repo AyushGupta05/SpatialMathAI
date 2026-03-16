@@ -67,7 +67,7 @@ export function pcmToWavBuffer(pcmBuffer, sampleRate = OUTPUT_SAMPLE_RATE, chann
 }
 
 export function buildNarrationPrompt() {
-  return `You are Nova Prism, narrating in the style of 3Blue1Brown.
+  return `You are SpatialMath, narrating in the style of 3Blue1Brown.
 
 Read the provided text aloud with these qualities:
 - Warm, curious, and unhurried. Like thinking alongside a friend.
@@ -79,7 +79,7 @@ Read the provided text aloud with these qualities:
 
 export function buildVoiceCoachPrompt(context = {}, session) {
   if (!context?.plan || !context?.sceneSnapshot) {
-    return `You are Nova Prism, a spoken spatial-maths tutor in the style of 3Blue1Brown.
+    return `You are SpatialMath, a spoken spatial-maths tutor in the style of 3Blue1Brown.
 - Speak warmly and curiously, like you're exploring an idea together.
 - Keep replies to 1-2 short sentences. Ask one guiding question.
 - Never give the answer directly. Point to what's in the scene and ask what they notice.
@@ -122,7 +122,7 @@ export function buildVoiceFallback({ text, context, userMessage }) {
       contextStepId: context.contextStepId || null,
     });
   }
-  return String(text || "Nova Prism voice is unavailable right now. Try a typed follow-up.");
+  return String(text || "SpatialMath voice is unavailable right now. Try a typed follow-up.");
 }
 
 function outputConfiguration(playbackMode, voiceId) {

@@ -256,3 +256,14 @@ test("normalizeScenePlan repairs named line endpoints and removes false origin n
   assert.doesNotMatch(plan.sceneFocus.primaryInsight, /\bA .* origin\b/i);
   assert.match(plan.sceneFocus.primaryInsight, /shared anchor point/i);
 });
+
+test("normalizeScenePlan preserves descriptive custom question types", () => {
+  const plan = normalizeScenePlan({
+    problem: {
+      question: "Differentiate x^2 + 3x.",
+      questionType: "differentiation",
+    },
+  });
+
+  assert.equal(plan.problem.questionType, "differentiation");
+});

@@ -1,7 +1,21 @@
 import { normalizeScenePlan } from "../../../src/ai/planSchema.js";
 import { defaultPositionForShape, defaultParamsForShape } from "../../../src/scene/schema.js";
+import {
+  buildAnalyticLessonStages,
+  buildAnalyticMoments,
+  buildBaseQuestionFields,
+  buildCommonAnalyticActions,
+  normalizePromptText,
+} from "./analyticMath.js";
+import {
+  DEFAULT_BOARD_ID,
+  buildBoardCameraBookmarks,
+  buildTextLessonBoard,
+  buildTextOverlayStack,
+} from "./textBoard.js";
 
 const DEFAULT_COLORS = ["#7cf7e4", "#48c9ff", "#ffd966", "#ff7ca8", "#b088f9"];
+const BUILTIN_QUESTION_TYPES = new Set(["volume", "surface_area", "composite", "spatial", "comparison"]);
 
 function extractNumber(text, patterns, fallback) {
   for (const pattern of patterns) {
@@ -14,24 +28,407 @@ function extractNumber(text, patterns, fallback) {
   return fallback;
 }
 
+function isBuiltInQuestionType(questionType = "") {
+  return BUILTIN_QUESTION_TYPES.has(String(questionType || "").trim());
+}
+
+function isSpatialPrompt(lower = "") {
+  return [
+    "distance",
+    "angle",
+    "intersect",
+    "intersection",
+    "projection",
+    "vector",
+    "plane",
+    "line",
+    "point",
+    "coordinate",
+    "midpoint",
+    "centroid",
+    "normal",
+    "parallel",
+    "perpendicular",
+    "triangle",
+    "prism",
+    "sphere",
+    "cylinder",
+    "cone",
+    "pyramid",
+    "cube",
+    "cuboid",
+    "3d",
+    "three-dimensional",
+  ].some((keyword) => lower.includes(keyword));
+}
+
+function inferCustomQuestionCategory(question) {
+  const normalized = normalizePromptText(question).toLowerCase();
+
+  if ((/\b(system|simultaneous)\b/.test(normalized) || /\bno solutions?\b/.test(normalized)) && /\bequations?\b/.test(normalized)) {
+    return "system of linear equations";
+  }
+  if (/\bdifferentiat|derivative\b/.test(normalized)) {
+    return "differentiation";
+  }
+  if (/\bintegrat|integral\b/.test(normalized)) {
+    return "integration";
+  }
+  if (/\bfactor\b/.test(normalized) && /\bx\^2|\bquadratic\b/.test(normalized)) {
+    return "quadratic factorization";
+  }
+  if (/\bsolve\b/.test(normalized) && /\bx\^2|\bquadratic\b/.test(normalized)) {
+    return "solving quadratic equations";
+  }
+  if (/\bmatrix|determinant|eigenvalue|inverse matrix\b/.test(normalized)) {
+    return "matrices";
+  }
+  if (/\bprobability|chance|odds|expected value\b/.test(normalized)) {
+    return "probability";
+  }
+  if (/\bmean|median|mode|standard deviation|variance\b/.test(normalized)) {
+    return "statistics";
+  }
+  if (/\bpolynomial|expand|simplify|equation\b/.test(normalized) || /=/.test(normalized)) {
+    return "general mathematics";
+  }
+  return "general mathematics";
+}
+
+function categorySubtype(questionType = "") {
+  return `custom_${String(questionType || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "") || "general_mathematics"}`;
+}
+
+function methodHintForCategory(questionType = "") {
+  switch (String(questionType || "").trim().toLowerCase()) {
+    case "system of linear equations":
+      return "Compare dependent equations before you classify consistency.";
+    case "differentiation":
+      return "Differentiate each term, then simplify the derivative.";
+    case "integration":
+      return "Integrate term by term and include the constant of integration when needed.";
+    case "quadratic factorization":
+      return "Look for two factors whose product and sum match the quadratic.";
+    case "solving quadratic equations":
+      return "Choose a method such as factoring, completing the square, or the quadratic formula.";
+    case "matrices":
+      return "Track row operations carefully and keep each matrix entry aligned.";
+    case "probability":
+      return "Name the sample space, count favourable cases, and check the denominator.";
+    case "statistics":
+      return "Organise the data first, then apply the definition that matches the target quantity.";
+    default:
+      return "Organise the givens, choose the controlling relationship, and check the conclusion against the question.";
+  }
+}
+
+function escapeLatexText(value = "") {
+  return String(value || "")
+    .replace(/\\/g, "\\textbackslash ")
+    .replace(/[{}]/g, "")
+    .replace(/\$/g, "");
+}
+
+function fragmentQuestionForBoard(question = "", sourceSummary = {}) {
+  const cleaned = String(sourceSummary.cleanedQuestion || question || "").trim();
+  const givens = Array.isArray(sourceSummary.givens)
+    ? sourceSummary.givens.map((value) => String(value || "").trim()).filter(Boolean)
+    : [];
+
+  if (givens.length) {
+    return givens.slice(0, 4).map((value) => value.length > 88 ? `${value.slice(0, 85)}...` : value);
+  }
+
+  return cleaned
+    .split(/(?<=[.?!])\s+|\n+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .slice(0, 4)
+    .map((value) => value.length > 88 ? `${value.slice(0, 85)}...` : value);
+}
+
+function buildCustomAnalyticFallbackPlan(question, questionType, mode = "guided", sourceSummary = {}) {
+  const category = questionType || inferCustomQuestionCategory(question);
+  const methodHint = methodHintForCategory(category);
+  const board = buildTextLessonBoard({
+    id: DEFAULT_BOARD_ID,
+    label: "Lesson board",
+    title: "Lesson board",
+    purpose: "Use the board to keep the prompt, method, and checks visible while SpatialMath guides the learner.",
+    width: 11,
+    height: 8,
+    color: "#20324d",
+  });
+  const boardLines = [
+    category[0].toUpperCase() + category.slice(1),
+    ...fragmentQuestionForBoard(question, sourceSummary),
+    "Goal: connect the givens to the unknown before you commit to a calculation.",
+  ];
+  const strategyLines = [
+    `Method hint: ${methodHint}`,
+    "Name the key relationship before you try to finish the full solution.",
+  ];
+  const reflectionLines = [
+    "Check: does your result answer the exact question that was asked?",
+    "If a step feels fragile, say which relation or definition you are using there.",
+  ];
+
+  const baseOverlays = buildTextOverlayStack(boardLines, {
+    prefix: "custom-base",
+    startY: 6.0,
+    step: 1.04,
+    z: 0.2,
+  });
+  const strategyOverlays = buildTextOverlayStack(strategyLines, {
+    prefix: "custom-strategy",
+    startY: 0.8,
+    step: 0.92,
+    z: 0.2,
+    style: "annotation",
+  });
+  const reflectionOverlays = buildTextOverlayStack(reflectionLines, {
+    prefix: "custom-reflection",
+    startY: -2.0,
+    step: 0.92,
+    z: 0.2,
+    style: "annotation",
+  });
+  const sceneOverlays = [
+    ...baseOverlays,
+    ...strategyOverlays,
+    ...reflectionOverlays,
+  ];
+  const cameraBookmarks = buildBoardCameraBookmarks({
+    id: "custom-board",
+    label: "Lesson board",
+    description: "Frame the prompt and the guided method notes together.",
+    position: [0, 3.2, 12.5],
+    target: [0, 3.0, 0],
+  });
+  const sceneMoments = buildAnalyticMoments([
+    {
+      id: "observe",
+      title: "Observe",
+      prompt: `Read the ${category} prompt first and pick out the givens before you calculate anything.`,
+      goal: "Identify what is fixed, what is unknown, and what the question is really asking for.",
+      focusTargets: [DEFAULT_BOARD_ID],
+      visibleObjectIds: [DEFAULT_BOARD_ID],
+      visibleOverlayIds: baseOverlays.map((overlay) => overlay.id),
+      cameraBookmarkId: "custom-board",
+    },
+    {
+      id: "relate",
+      title: "Relate",
+      prompt: `Choose a method for this ${category} problem and say why it fits the givens.`,
+      goal: "Connect the prompt to a solving method before pushing through the algebra.",
+      focusTargets: [DEFAULT_BOARD_ID],
+      visibleObjectIds: [DEFAULT_BOARD_ID],
+      visibleOverlayIds: [
+        ...baseOverlays.map((overlay) => overlay.id),
+        ...strategyOverlays.map((overlay) => overlay.id),
+      ],
+      cameraBookmarkId: "custom-board",
+    },
+    {
+      id: "plan",
+      title: "Plan",
+      prompt: "Write the decisive next step in words before you carry it out.",
+      goal: "Turn the method into one concrete next move.",
+      focusTargets: [DEFAULT_BOARD_ID],
+      visibleObjectIds: [DEFAULT_BOARD_ID],
+      visibleOverlayIds: [
+        ...baseOverlays.map((overlay) => overlay.id),
+        ...strategyOverlays.map((overlay) => overlay.id),
+      ],
+      cameraBookmarkId: "custom-board",
+      revealFormula: true,
+    },
+    {
+      id: "check",
+      title: "Check",
+      prompt: "Now test whether the step you chose actually answers the question instead of just producing another expression.",
+      goal: "Check the method and the target before locking in the answer.",
+      focusTargets: [DEFAULT_BOARD_ID],
+      visibleObjectIds: [DEFAULT_BOARD_ID],
+      visibleOverlayIds: sceneOverlays.map((overlay) => overlay.id),
+      cameraBookmarkId: "custom-board",
+      revealFormula: true,
+    },
+    {
+      id: "explain",
+      title: "Explain",
+      prompt: `Summarise the key idea behind this ${category} question in one or two sentences.`,
+      goal: "Explain the controlling idea in your own words.",
+      focusTargets: [DEFAULT_BOARD_ID],
+      visibleObjectIds: [DEFAULT_BOARD_ID],
+      visibleOverlayIds: sceneOverlays.map((overlay) => overlay.id),
+      cameraBookmarkId: "custom-board",
+      revealFormula: true,
+      revealFullSolution: true,
+    },
+  ]);
+  const lessonStages = buildAnalyticLessonStages(sceneMoments).map((stage, index) => ({
+    ...stage,
+    suggestedActions: buildCommonAnalyticActions(index < sceneMoments.length - 1),
+  }));
+  const subtype = categorySubtype(category);
+  const formulaText = `\\text{${escapeLatexText(methodHint)}}`;
+
+  return normalizeScenePlan({
+    ...buildBaseQuestionFields(question, subtype, sourceSummary, `Guide the learner through a ${category} question with a text-first lesson board.`),
+    problem: {
+      id: `heuristic-${subtype}`,
+      question,
+      questionType: category,
+      summary: `Guide the learner through the ${category} prompt step by step.`,
+      mode,
+    },
+    sceneFocus: {
+      concept: category,
+      primaryInsight: methodHint,
+      focusPrompt: "Name the relationship or definition that controls the next step.",
+      judgeSummary: "The learner identifies the givens, chooses a method, and explains why that method fits the question.",
+    },
+    learningMoments: {
+      orient: {
+        title: "Read the prompt",
+        coachMessage: sceneMoments[0].prompt,
+        goal: sceneMoments[0].goal,
+        prompt: sceneMoments[0].prompt,
+        insight: "",
+        whyItMatters: "Clear reading prevents the learner from solving the wrong problem.",
+      },
+      build: {
+        title: "Choose a method",
+        coachMessage: sceneMoments[1].prompt,
+        goal: sceneMoments[1].goal,
+        prompt: sceneMoments[1].prompt,
+        insight: "",
+        whyItMatters: "Picking the right method early saves time and confusion later.",
+      },
+      predict: {
+        title: "Plan the next move",
+        coachMessage: sceneMoments[2].prompt,
+        goal: sceneMoments[2].goal,
+        prompt: sceneMoments[2].prompt,
+        insight: methodHint,
+        whyItMatters: "A strong next-step plan keeps the algebra purposeful.",
+      },
+      check: {
+        title: "Check the target",
+        coachMessage: sceneMoments[3].prompt,
+        goal: sceneMoments[3].goal,
+        prompt: sceneMoments[3].prompt,
+        insight: "",
+        whyItMatters: "Checking early catches method mistakes before they compound.",
+      },
+      reflect: {
+        title: "Explain the idea",
+        coachMessage: sceneMoments[4].prompt,
+        goal: sceneMoments[4].goal,
+        prompt: sceneMoments[4].prompt,
+        insight: methodHint,
+        whyItMatters: "Reflection helps the learner reuse the method on the next question.",
+      },
+      challenge: {
+        title: "Ask More",
+        coachMessage: "Ask SpatialMath to unpack any step, method choice, or check on the board.",
+        goal: "Keep the follow-up tied to the visible prompt and method notes.",
+        prompt: "Which part of the method should SpatialMath explain next?",
+        insight: "",
+        whyItMatters: "Follow-up questions stay grounded in the same problem.",
+      },
+    },
+    objectSuggestions: [board],
+    buildSteps: sceneMoments.map((moment, index) => ({
+      id: moment.id,
+      title: moment.title,
+      instruction: moment.goal,
+      hint: moment.prompt,
+      action: index < 2 ? "observe" : "answer",
+      focusConcept: category,
+      coachPrompt: moment.prompt,
+      suggestedObjectIds: [DEFAULT_BOARD_ID],
+      requiredObjectIds: [DEFAULT_BOARD_ID],
+      cameraBookmarkId: moment.cameraBookmarkId,
+      highlightObjectIds: [DEFAULT_BOARD_ID],
+    })),
+    lessonStages,
+    cameraBookmarks,
+    answerScaffold: {
+      finalAnswer: null,
+      unit: "",
+      formula: formulaText,
+      explanation: methodHint,
+      checks: [
+        "Have you identified the givens and the real target?",
+        "Does your method fit the structure of the question?",
+        "Can you explain why the step you chose moves you toward the answer?",
+      ],
+    },
+    analyticContext: {
+      subtype,
+      entities: {
+        points: [],
+        lines: [],
+        planes: [],
+      },
+      derivedValues: {
+        category,
+      },
+      formulaCard: {
+        title: category[0].toUpperCase() + category.slice(1),
+        formula: formulaText,
+        explanation: methodHint,
+      },
+      solutionSteps: [
+        {
+          id: "method-step-1",
+          title: "Read the givens",
+          formula: "",
+          explanation: "Start by naming the important values, conditions, or expressions in the prompt.",
+        },
+        {
+          id: "method-step-2",
+          title: "Choose the method",
+          formula: "",
+          explanation: methodHint,
+        },
+        {
+          id: "method-step-3",
+          title: "Check the target",
+          formula: "",
+          explanation: "Before finalising the answer, check that the work addresses the exact quantity or statement the prompt asked for.",
+        },
+      ],
+    },
+    sceneMoments,
+    sceneOverlays,
+    challengePrompts: [{
+      id: "custom-follow-up",
+      prompt: "What method would you try next, and why does it fit this prompt?",
+      expectedKind: "text",
+      expectedAnswer: null,
+      tolerance: 0,
+    }],
+    liveChallenge: null,
+  });
+}
+
 function inferQuestionType(question) {
   const lower = question.toLowerCase();
   if (lower.includes("surface area")) return "surface_area";
   if (lower.includes("volume")) return "volume";
   if (lower.includes("compare") || lower.includes("greater")) return "comparison";
   if (lower.includes("composite") || lower.includes("together")) return "composite";
-  if (
-    lower.includes("distance")
-    || lower.includes("angle")
-    || lower.includes("intersect")
-    || lower.includes("projection")
-    || lower.includes("vector")
-    || lower.includes("plane")
-    || lower.includes("line")
-  ) {
+  if (isSpatialPrompt(lower)) {
     return "spatial";
   }
-  return "spatial";
+  return inferCustomQuestionCategory(question);
 }
 
 function inferShape(question) {
@@ -319,7 +716,7 @@ function inferSceneFocus(question, shape, questionType, sourceSummary, helperSug
     concept: sourceSummary.diagramSummary ? "spatial relationship" : `${shape} structure`,
     primaryInsight: "Use the scene to make the important spatial relationship visible.",
     focusPrompt: "Focus on the one relationship that would be hardest to see on paper.",
-    judgeSummary: "The student acts on a scene and Nova responds to that specific action.",
+    judgeSummary: "The student acts on a scene and SpatialMath responds to that specific action.",
   };
 }
 
@@ -412,8 +809,14 @@ export function heuristicSourceSummary({ questionText = "", imageAsset = null })
 
 export function heuristicPlan(question, mode = "guided", sourceSummary = null) {
   const workingQuestion = (sourceSummary?.cleanedQuestion || question || "").trim();
-  const shape = inferShape(workingQuestion);
   const questionType = inferQuestionType(workingQuestion);
+  const effectiveSourceSummary = sourceSummary || heuristicSourceSummary({ questionText: workingQuestion, imageAsset: null });
+
+  if (!isBuiltInQuestionType(questionType)) {
+    return buildCustomAnalyticFallbackPlan(workingQuestion, questionType, mode, effectiveSourceSummary);
+  }
+
+  const shape = inferShape(workingQuestion);
   const supportingSolid = workingQuestion.toLowerCase().includes("plane") ? inferSupportingSolid(workingQuestion) : null;
   const primaryShape = supportingSolid && supportingSolid !== shape ? supportingSolid : shape;
   const primaryObject = buildPrimaryObject(workingQuestion, primaryShape);
@@ -527,8 +930,8 @@ export function heuristicPlan(question, mode = "guided", sourceSummary = null) {
         : `Build the ${primaryShape === "pointMarker" ? "reference point" : primaryShape} and the key helpers, then reason from the scene.`,
       mode,
     },
-    overview: "Nova turned the question into a guided, editable lesson scene. Build or inspect the scene, make a prediction, then check it in 3D.",
-    sourceSummary: sourceSummary || heuristicSourceSummary({ questionText: workingQuestion, imageAsset: null }),
+    overview: "SpatialMath turned the question into a guided, editable lesson scene. Build or inspect the scene, make a prediction, then check it in 3D.",
+    sourceSummary: effectiveSourceSummary,
     sceneFocus,
     learningMoments: buildLearningMoments({
       question: workingQuestion,

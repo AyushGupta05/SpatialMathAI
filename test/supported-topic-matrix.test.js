@@ -41,6 +41,15 @@ test("supported builder prompts map to stable lesson families", async (t) => {
         assert.ok(plan.buildSteps.length >= 2);
       },
     },
+    {
+      name: "custom algebra fallback",
+      prompt: "Differentiate x^3 + 4x^2 - 5x.",
+      assertPlan(plan) {
+        assert.equal(plan.problem.questionType, "differentiation");
+        assert.equal(plan.experienceMode, "analytic_auto");
+        assert.ok(plan.objectSuggestions.some((item) => item.id === "analysis-board"));
+      },
+    },
   ];
 
   for (const builderCase of builderCases) {

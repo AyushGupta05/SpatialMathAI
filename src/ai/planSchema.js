@@ -42,7 +42,9 @@ function uniqueStrings(values = []) {
 }
 
 function normalizeQuestionType(value) {
-  return VALID_QUESTION_TYPES.includes(value) ? value : "spatial";
+  const normalized = normalizeString(value, "").trim();
+  if (!normalized) return "spatial";
+  return VALID_QUESTION_TYPES.includes(normalized) ? normalized : normalized;
 }
 
 function normalizeInputMode(value, fallback = "text") {
@@ -371,7 +373,7 @@ function normalizeAgentTrace(items = []) {
 
 function normalizeDemoPreset(preset = {}, sceneFocus = {}, sourceSummary = {}) {
   return {
-    title: normalizeString(preset.title, sourceSummary.cleanedQuestion || sceneFocus.concept || "Nova Prism demo"),
+    title: normalizeString(preset.title, sourceSummary.cleanedQuestion || sceneFocus.concept || "SpatialMath demo"),
     scriptBeat: normalizeString(
       preset.scriptBeat,
       sceneFocus.judgeSummary || sceneFocus.primaryInsight || "Turn the worksheet into a live 3D lesson and coach the learner through it."
@@ -393,7 +395,7 @@ function normalizeSceneFocus(sceneFocus = {}, question = "") {
     focusPrompt: normalizeString(sceneFocus.focusPrompt, primaryInsight),
     judgeSummary: normalizeString(
       sceneFocus.judgeSummary,
-      "The student acts on the scene, and Nova responds to that action."
+      "The student acts on the scene, and SpatialMath responds to that action."
     ),
   };
 }

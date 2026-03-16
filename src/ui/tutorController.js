@@ -23,6 +23,7 @@ import {
   currentVerdictEntry,
   deriveHintTypeFromLabel,
   isAutoAdvanceEnabled,
+  resolveHintFollowUpActionState,
   resolveTutorActionState,
 } from "../core/tutorActions.js";
 import { mergeRequiredSceneObjects, shouldSyncAnalyticScene } from "./sceneDirectiveSync.js";
@@ -48,7 +49,7 @@ let cameraDirector = null;
 let assessmentTimer = null;
 let questionImageFile = null;
 let questionImagePreviewUrl = null;
-let lastSceneFeedback = "Nova Prism will react to what you do in the scene.";
+let lastSceneFeedback = "SpatialMath will react to what you do in the scene.";
 let voiceConversationId = null;
 let activeMicCapture = null;
 let voiceModeTogglePromise = null;
@@ -466,7 +467,7 @@ function localVoicePlaybackActive() {
 
 function showVoicePlaybackStatus() {
   updateVoiceVisualState("responding");
-  updateVoiceStatus("Nova is responding...", "ready");
+  updateVoiceStatus("SpatialMath is responding...", "ready");
 }
 
 function queueVoicePlaybackRelease() {
@@ -813,7 +814,7 @@ function buildSystemContextMessage(plan = activePlan()) {
   const givens = evidence.givens?.length ? ` Givens: ${evidence.givens.join(", ")}.` : "";
   const conflicts = evidence.conflicts?.length ? ` Check this mismatch: ${evidence.conflicts.join(" ")}` : "";
   const analytic = isAnalyticPlan(plan)
-    ? ` Nova auto-drew the scene for ${plan.analyticContext?.subtype?.replaceAll("_", " ") || "analytic geometry"}.`
+    ? ` SpatialMath auto-drew the scene for ${plan.analyticContext?.subtype?.replaceAll("_", " ") || "analytic geometry"}.`
     : "";
   return `${source}${givens}${conflicts}${analytic}`.trim();
 }
@@ -1398,12 +1399,12 @@ function renderSceneInfo() {
           <span class="formula">V = ${formatNumber(selected.metrics.volume)}, SA = ${formatNumber(selected.metrics.surfaceArea)}</span>
         </p>
       `
-      : `<p class="muted-text" style="margin:8px 0 0">Select an object, or ask Nova to explain or remix the scene.</p>`;
+      : `<p class="muted-text" style="margin:8px 0 0">Select an object, or ask SpatialMath to explain or remix the scene.</p>`;
 
     sceneInfo.innerHTML = `
       <p style="margin:0 0 6px"><strong>Freeform scene</strong></p>
       <p class="muted-text">${count} object${count === 1 ? "" : "s"} currently in the world</p>
-      <p class="muted-text">Nova can read this scene, talk about it, and edit it if you ask.</p>
+      <p class="muted-text">SpatialMath can read this scene, talk about it, and edit it if you ask.</p>
       ${freeformSelectionMarkup}
     `;
     return;
@@ -1455,7 +1456,7 @@ function renderAssessment(assessment) {
 
   if (!assessment) {
     if (!activePlan()) {
-      sceneValidation.innerHTML = `<p class="muted-text">Nova can chat about anything, inspect the current scene, and build a fresh math visual when you ask.</p>`;
+      sceneValidation.innerHTML = `<p class="muted-text">SpatialMath can chat about anything, inspect the current scene, and build a fresh math visual when you ask.</p>`;
       return;
     }
     sceneValidation.innerHTML = `<p class="muted-text">The tutor will inspect the scene and highlight the next useful idea.</p>`;
@@ -1785,7 +1786,7 @@ function setPlan(plan, options = {}) {
   tutorState.setPlan(normalizedPlan, { mode: options.mode || normalizedPlan.problem?.mode || "guided" });
   tutorState.setPhase(isAnalyticPlan(normalizedPlan) ? "guided_build" : "plan_ready");
   tutorState.setLearningStage(isAnalyticPlan(normalizedPlan) ? "build" : "orient");
-  lastSceneFeedback = normalizedPlan.sceneFocus?.primaryInsight || "Nova Prism will react to what you do in the scene.";
+  lastSceneFeedback = normalizedPlan.sceneFocus?.primaryInsight || "SpatialMath will react to what you do in the scene.";
 
   clearTranscript();
   setCheckpointState(null);
@@ -2322,6 +2323,7 @@ async function handleExplain() {
 async function requestTutorHint(action = {}) {
   const gap = action.payload?.gap || latestVerdictGap();
   const hintType = action.payload?.hint_type || deriveHintTypeFromLabel(action.label || "");
+  tutorState.useHint();
   await sendTutorMessage({
     ...buildTutorPayload("__hint_request__"),
     userMessage: "__hint_request__",
@@ -2332,7 +2334,12 @@ async function requestTutorHint(action = {}) {
     hint_state: { ...(tutorState.hint_state || {}) },
   }, {
     showUserMessage: false,
-    resolveActions: () => latestTutorActionState,
+    resolveActions: (_response, { plan }) => resolveHintFollowUpActionState({
+      plan,
+      stage: getCurrentStage(plan),
+      learningState: tutorState.snapshot(),
+      completionState: tutorState.completionState,
+    }),
   });
 }
 
@@ -2430,11 +2437,11 @@ function setVoiceStatusForState(state = voiceSessionState) {
     return;
   }
   if (state === "processing") {
-    updateVoiceStatus(lastVoiceTranscript ? `Nova heard: ${lastVoiceTranscript}` : "Processing...", "ready");
+    updateVoiceStatus(lastVoiceTranscript ? `SpatialMath heard: ${lastVoiceTranscript}` : "Processing...", "ready");
     return;
   }
   if (state === "responding") {
-    updateVoiceStatus("Nova is responding...", "ready");
+    updateVoiceStatus("SpatialMath is responding...", "ready");
     return;
   }
   updateVoiceStatus(standbyVoiceStatus(), voiceModeEnabled ? "ready" : "hidden");
@@ -2493,7 +2500,7 @@ function handleVoiceSessionEvent(event = {}) {
       if (event.inputTranscript) {
         setVoiceTranscript(event.inputTranscript);
       }
-      setVoiceAssistantMessage(event.assistantText || "Nova Prism did not return a voice reply.", {
+      setVoiceAssistantMessage(event.assistantText || "SpatialMath did not return a voice reply.", {
         final: true,
       });
       voiceConversationId = event.conversationId || voiceConversationId;

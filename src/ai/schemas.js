@@ -17,7 +17,9 @@ export function validateSceneSpec(spec) {
 
   return {
     question: spec.question || "",
-    questionType: VALID_QUESTION_TYPES.includes(spec.questionType) ? spec.questionType : "volume",
+    questionType: typeof spec.questionType === "string" && spec.questionType.trim()
+      ? spec.questionType.trim()
+      : "volume",
     objects: (spec.objects || []).map((obj, i) => validateSceneObject(obj, i)),
     labels: (spec.labels || []).map(validateLabel),
     dimensions: (spec.dimensions || []).map(validateDimension),

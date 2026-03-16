@@ -21,12 +21,18 @@ class FakeAudioContext {
   }
 
   createBufferSource() {
+    const context = this;
     const source = {
       buffer: null,
       onended: null,
+      endTime: 0,
       connect() {},
-      start() {},
+      start(startTime = 0) {
+        context.currentTime = Math.max(context.currentTime, startTime);
+        source.endTime = startTime + (source.buffer?.duration || 0);
+      },
       stop() {
+        context.currentTime = Math.max(context.currentTime, source.endTime);
         source.onended?.();
       },
     };
@@ -70,7 +76,7 @@ test("PcmAudioPlayer.whenIdle waits until the queued source finishes", async () 
     assert.equal(settled, false);
 
     const [source] = [...player.sources];
-    source.onended?.();
+    source.stop();
 
     await idlePromise;
     assert.equal(settled, true);

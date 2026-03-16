@@ -83,6 +83,76 @@ function shouldPromoteToAnalyticAuto(plan, questionText = "", sourceSummary = {}
   return hasAnalyticSceneObjects(plan) && (plan?.buildSteps?.length >= 2 || plan?.objectSuggestions?.length >= 3);
 }
 
+function isCoordinateFrameSolidSuggestion(suggestion = {}, question = "") {
+  const shape = suggestion?.object?.shape || "";
+  if (!["cube", "cuboid"].includes(shape)) {
+    return false;
+  }
+
+  if (!includesWord(question, /\b(vector|vectors|coordinate|coordinates|grid|point|points|line|lines|plane|planes|angle|distance|projection)\b/i)) {
+    return false;
+  }
+
+  const roles = [
+    ...(suggestion?.roles || []),
+    ...(suggestion?.object?.metadata?.roles || []),
+    suggestion?.object?.metadata?.role || "",
+  ];
+  const haystack = [
+    suggestion?.id,
+    suggestion?.title,
+    suggestion?.purpose,
+    suggestion?.object?.label,
+    ...roles,
+  ].filter(Boolean).join(" ").toLowerCase();
+
+  return /\b(frame|reference|grid|axis|axes|coordinate)\b/i.test(haystack);
+}
+
+function pruneAnalyticReferenceSolids(plan = {}, options = {}) {
+  const analyticQuestion = normalizePromptText(
+    options.questionText
+    || options.sourceSummary?.cleanedQuestion
+    || plan?.problem?.question
+    || ""
+  );
+  if (!analyticQuestion) {
+    return plan;
+  }
+
+  const removableSuggestions = (plan.objectSuggestions || []).filter((suggestion) =>
+    isCoordinateFrameSolidSuggestion(suggestion, analyticQuestion)
+  );
+  if (!removableSuggestions.length) {
+    return plan;
+  }
+
+  const removableSuggestionIds = new Set(removableSuggestions.map((suggestion) => suggestion.id));
+  const removableObjectIds = new Set(
+    removableSuggestions
+      .map((suggestion) => suggestion.object?.id)
+      .filter(Boolean)
+  );
+  const filteredSuggestions = (plan.objectSuggestions || []).filter((suggestion) => !removableSuggestionIds.has(suggestion.id));
+
+  return normalizeScenePlan({
+    ...plan,
+    objectSuggestions: filteredSuggestions,
+    buildSteps: (plan.buildSteps || []).map((step) => ({
+      ...step,
+      suggestedObjectIds: (step.suggestedObjectIds || []).filter((id) => !removableSuggestionIds.has(id)),
+      requiredObjectIds: (step.requiredObjectIds || []).filter((id) => !removableSuggestionIds.has(id)),
+      highlightObjectIds: (step.highlightObjectIds || []).filter((id) => !removableObjectIds.has(id)),
+    })),
+    sceneMoments: (plan.sceneMoments || []).map((moment) => ({
+      ...moment,
+      visibleObjectIds: (moment.visibleObjectIds || []).filter((id) => !removableSuggestionIds.has(id)),
+      focusTargets: (moment.focusTargets || []).filter((id) => !removableObjectIds.has(id)),
+    })).filter((moment) => (moment.visibleObjectIds || []).length),
+    sceneOverlays: (plan.sceneOverlays || []).filter((overlay) => !removableObjectIds.has(overlay.targetObjectId)),
+  });
+}
+
 function objectPoints(objectSpec = {}) {
   if (!objectSpec || typeof objectSpec !== "object") return [];
   if (objectSpec.shape === "line") {
@@ -363,23 +433,78 @@ function focusTargetsForStep(step = {}, stepSuggestionIds = [], suggestionsById 
   );
 }
 
+function splitLineRevealStageSpecs(step = {}, index = 0, resolvedIds = [], cumulativeSuggestionIds = new Set(), suggestionsById = new Map(), cameraId = "overview") {
+  if (index === 0) {
+    return null;
+  }
+
+  const newLineSuggestionIds = resolvedIds.filter((suggestionId) =>
+    !cumulativeSuggestionIds.has(suggestionId)
+    && suggestionsById.get(suggestionId)?.object?.shape === "line"
+  );
+  if (newLineSuggestionIds.length <= 1) {
+    return null;
+  }
+
+  const baseVisibleIds = uniqueStrings([
+    ...cumulativeSuggestionIds,
+    ...resolvedIds.filter((suggestionId) => !newLineSuggestionIds.includes(suggestionId)),
+  ]);
+  const stagedVisibleIds = new Set(baseVisibleIds);
+
+  return newLineSuggestionIds.map((suggestionId, revealIndex) => {
+    stagedVisibleIds.add(suggestionId);
+    const suggestion = suggestionsById.get(suggestionId);
+    const lineLabel = suggestion?.object?.label || suggestion?.title || `Line ${revealIndex + 1}`;
+    const lineObjectId = suggestion?.object?.id || null;
+
+    return {
+      id: revealIndex === newLineSuggestionIds.length - 1
+        ? (step.id || `moment-${index + 1}`)
+        : `${step.id || `moment-${index + 1}`}-reveal-${revealIndex + 1}`,
+      title: `Show ${lineLabel}`,
+      prompt: step.coachPrompt || step.hint || step.instruction || "Look closely at the staged scene.",
+      goal: step.instruction || step.title || `Use ${lineLabel} to continue the calculation.`,
+      focusTargets: uniqueStrings([
+        ...(lineObjectId ? [lineObjectId] : []),
+        ...((step.highlightObjectIds || []).filter((objectId) => objectId !== lineObjectId)),
+      ]),
+      visibleObjectIds: [...stagedVisibleIds],
+      cameraBookmarkId: step.cameraBookmarkId || cameraId,
+    };
+  });
+}
+
 function buildStageSpecsFromBuildSteps(plan, cameraId) {
   const suggestionsById = new Map((plan.objectSuggestions || []).map((suggestion) => [suggestion.id, suggestion]));
   const suggestionIdByObjectId = new Map((plan.objectSuggestions || []).map((suggestion) => [suggestion.object?.id, suggestion.id]));
   const cumulativeSuggestionIds = new Set();
   const steps = Array.isArray(plan.buildSteps) ? plan.buildSteps : [];
 
-  return steps.map((step, index) => {
+  return steps.flatMap((step, index) => {
     const stepSuggestionIds = suggestionIdsForStep(step, suggestionIdByObjectId);
     const resolvedIds = stepSuggestionIds.length
       ? stepSuggestionIds
       : (index === 0 && plan.objectSuggestions[0]?.id)
         ? [plan.objectSuggestions[0].id]
         : [];
+    const splitStages = splitLineRevealStageSpecs(
+      step,
+      index,
+      resolvedIds,
+      cumulativeSuggestionIds,
+      suggestionsById,
+      cameraId,
+    );
     resolvedIds.forEach((suggestionId) => cumulativeSuggestionIds.add(suggestionId));
+
+    if (splitStages?.length) {
+      return splitStages;
+    }
+
     const visibleObjectIds = [...cumulativeSuggestionIds];
 
-    return {
+    return [{
       id: step.id || `moment-${index + 1}`,
       title: step.title || `Step ${index + 1}`,
       prompt: step.coachPrompt || step.hint || step.instruction || "Look closely at the staged scene.",
@@ -387,7 +512,7 @@ function buildStageSpecsFromBuildSteps(plan, cameraId) {
       focusTargets: focusTargetsForStep(step, resolvedIds, suggestionsById),
       visibleObjectIds: visibleObjectIds.length ? visibleObjectIds : resolvedIds,
       cameraBookmarkId: step.cameraBookmarkId || cameraId,
-    };
+    }];
   }).filter((stage) => stage.visibleObjectIds.length);
 }
 
@@ -488,7 +613,7 @@ function buildAnalyticContext(plan, sourceSteps = []) {
       stagedMomentCount: sourceSteps.length,
     },
     formulaCard: {
-      title: plan.sceneFocus?.concept || "Nova-guided formula walkthrough",
+      title: plan.sceneFocus?.concept || "SpatialMath-guided formula walkthrough",
       formula: plan.answerScaffold?.formula || "",
       explanation: plan.answerScaffold?.explanation || plan.overview || "Use the staged scene to connect the visible structure to the calculation.",
     },
@@ -504,10 +629,11 @@ function analyticLessonStages(sceneMoments = []) {
 }
 
 export function promoteNovaPlanToAnalyticAuto(rawPlan, options = {}) {
-  const plan = normalizeScenePlan(rawPlan);
+  let plan = normalizeScenePlan(rawPlan);
   if (!shouldPromoteToAnalyticAuto(plan, options.questionText, options.sourceSummary || plan.sourceSummary)) {
     return plan;
   }
+  plan = pruneAnalyticReferenceSolids(plan, options);
 
   const bounds = buildBounds(plan);
   const cameraBookmarks = buildCameraBookmarks(plan, bounds);

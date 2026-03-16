@@ -62,6 +62,13 @@ function stagePayload(stage = null) {
 function nextStageForReply(plan, learningState = {}, contextStepId = null, assessment = null, conceptVerdict = null) {
   const currentStage = currentStageForReply(plan, learningState, contextStepId, assessment);
   if (!currentStage) return null;
+  if (plan?.experienceMode === "analytic_auto") {
+    if (conceptVerdict?.verdict !== "CORRECT") {
+      return currentStage;
+    }
+    const currentIndex = Math.max(0, plan.lessonStages.findIndex((stage) => stage.id === currentStage.id));
+    return plan.lessonStages[currentIndex + 1] || currentStage;
+  }
   const nextStageKey = nextLearningStage(learningState?.learningStage || "orient", conceptVerdict, assessment);
   if (["predict", "check", "reflect", "challenge"].includes(nextStageKey)) {
     return learningMomentStage(plan, nextStageKey);
@@ -71,6 +78,11 @@ function nextStageForReply(plan, learningState = {}, contextStepId = null, asses
   }
   const currentIndex = Math.max(0, plan.lessonStages.findIndex((stage) => stage.id === currentStage.id));
   return plan.lessonStages[currentIndex + 1] || currentStage;
+}
+
+function sceneMomentForStageId(plan, stageId = null) {
+  if (!plan?.sceneMoments?.length || !stageId) return null;
+  return plan.sceneMoments.find((moment) => moment.id === stageId) || null;
 }
 
 export function createTutorRoute({
@@ -282,7 +294,9 @@ ${instruction}`.trim();
       ? numericCompletion
       : { complete: false, reason: null };
     const nextStage = nextStageForReply(plan, effectiveLearningState, contextStepId, assessment, conceptVerdict);
-    const nextLearningStageKey = nextLearningStage(effectiveLearningState?.learningStage || "orient", conceptVerdict, assessment);
+    const nextLearningStageKey = plan?.experienceMode === "analytic_auto"
+      ? (effectiveLearningState?.learningStage || "build")
+      : nextLearningStage(effectiveLearningState?.learningStage || "orient", conceptVerdict, assessment);
 
     const responseKind = revealSolution
       ? "solution_shown"
@@ -313,6 +327,28 @@ ${instruction}`.trim();
         ...(responseMeta.stageStatus || {}),
         currentStageId: nextStage.id,
       };
+      if (
+        plan?.experienceMode === "analytic_auto"
+        && conceptVerdict?.verdict === "CORRECT"
+        && !completionState.complete
+      ) {
+        const nextSceneMoment = sceneMomentForStageId(plan, nextStage.id);
+        if (nextSceneMoment) {
+          responseMeta.focusTargets = nextSceneMoment.focusTargets?.length
+            ? nextSceneMoment.focusTargets
+            : responseMeta.focusTargets;
+          responseMeta.sceneDirective = {
+            ...(responseMeta.sceneDirective || {}),
+            stageId: nextSceneMoment.id,
+            cameraBookmarkId: nextSceneMoment.cameraBookmarkId || responseMeta.sceneDirective?.cameraBookmarkId || null,
+            focusTargets: responseMeta.focusTargets,
+            visibleObjectIds: nextSceneMoment.visibleObjectIds || [],
+            visibleOverlayIds: nextSceneMoment.visibleOverlayIds || [],
+            revealFormula: Boolean(nextSceneMoment.revealFormula),
+            revealFullSolution: Boolean(nextSceneMoment.revealFullSolution),
+          };
+        }
+      }
     }
     responseMeta.nextLearningStage = nextLearningStageKey;
     if (conceptVerdict?.verdict === "CORRECT" && nextStage?.checkpointPrompt) {

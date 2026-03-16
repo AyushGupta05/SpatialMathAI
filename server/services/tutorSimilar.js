@@ -52,6 +52,20 @@ const ANALYTIC_TEMPLATES = {
       prompt: "Two lines in space are given by r1 = (2,1,-1) + t(3,-2,1), r2 = (0,4,2) + s(1,1,-2). Find the shortest distance between the two skew lines.",
     },
   ],
+  system_of_linear_equations: [
+    {
+      label: "Consistency Parameter",
+      prompt: "Find the values of m for which the system x + y + z = 4, x + 3y - z = 2, and 2y - z = m has no solutions and the value of m for which it has infinitely many solutions.",
+    },
+    {
+      label: "Dependent Third Equation",
+      prompt: "Determine the values of p for which the system 2x - y + z = 1, 2x + 3y - z = 5, and 4y - 2z = p has no solutions and the value of p for which it has infinitely many solutions.",
+    },
+    {
+      label: "Row-Match Practice",
+      prompt: "Find the values of k for which the system x + 2y - z = 3, x + 6y - 3z = 7, and 4y - 2z = k has no solutions and the value of k for which it has infinitely many solutions.",
+    },
+  ],
 };
 
 const QUESTION_TYPE_TEMPLATES = {
@@ -159,6 +173,7 @@ function conceptKeywords(plan) {
     volume: ["volume", "solid", "radius", "height"],
     surface_area: ["surface", "area", "faces", "lateral"],
     comparison: ["compare", "greater", "difference", "volume"],
+    system_of_linear_equations: ["system", "equations", "consistent", "infinite", "parameter", "row"],
   };
   for (const token of extras[subtype] || extras[plan?.problem?.questionType] || []) {
     base.add(token);

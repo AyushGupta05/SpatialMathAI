@@ -5,16 +5,21 @@ function firstValue(...values) {
   return "";
 }
 
+function isStandardQuestionType(value = "") {
+  return ["volume", "surface_area", "composite", "spatial", "comparison"].includes(String(value || "").trim());
+}
+
 export function buildDemoPreset({ plan, sourceSummary, exemplar = null }) {
-  const category = exemplar?.lesson_type || "geometry";
+  const customCategory = !isStandardQuestionType(plan?.problem?.questionType) ? plan?.problem?.questionType : "";
+  const category = exemplar?.lesson_type || customCategory || "geometry";
   const concept = plan?.sceneFocus?.concept || sourceSummary?.cleanedQuestion || "spatial reasoning";
-  const insight = plan?.sceneFocus?.judgeSummary || plan?.overview || "Nova turns a worksheet into an interactive 3D lesson.";
+  const insight = plan?.sceneFocus?.judgeSummary || plan?.overview || "SpatialMath turns a worksheet into an interactive 3D lesson.";
 
   return {
-    title: firstValue(exemplar?.title, `Nova Prism: ${concept}`),
+    title: firstValue(exemplar?.title, `SpatialMath: ${concept}`),
     scriptBeat: firstValue(
       exemplar?.representation_hint,
-      `We start from a flat worksheet, turn it into a live 3D lesson, and let Nova coach the learner through build, prediction, and feedback. ${insight}`
+      `We start from a flat worksheet, turn it into a live 3D lesson, and let SpatialMath coach the learner through build, prediction, and feedback. ${insight}`
     ),
     recommendedCategory: category,
   };

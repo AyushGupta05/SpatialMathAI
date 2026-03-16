@@ -84,7 +84,7 @@ function subtypeForQuestion(question = "") {
 function buildPlanFields(_questionText, _sourceSummary = {}, subtype) {
   if (subtype === "flux") {
     return {
-      overview: "Nova built an electric-field playground with a Gaussian surface so the learner can see flux as field lines crossing a boundary.",
+      overview: "SpatialMath built an electric-field playground with a Gaussian surface so the learner can see flux as field lines crossing a boundary.",
       sceneFocus: {
         concept: "electric flux",
         primaryInsight: "Flux depends on whether field lines leave or enter the chosen surface, not just on the surface size.",
@@ -106,7 +106,7 @@ function buildPlanFields(_questionText, _sourceSummary = {}, subtype) {
 
   if (subtype === "dipole") {
     return {
-      overview: "Nova built an electric dipole so the learner can drag the charges and watch the field bend between them in real time.",
+      overview: "SpatialMath built an electric dipole so the learner can drag the charges and watch the field bend between them in real time.",
       sceneFocus: {
         concept: "electric dipole field",
         primaryInsight: "Field lines leave the positive charge and bend toward the negative charge.",
@@ -127,7 +127,7 @@ function buildPlanFields(_questionText, _sourceSummary = {}, subtype) {
   }
 
   return {
-    overview: "Nova built a single-charge field scene so the learner can connect arrow direction, density, and particle motion to electric force.",
+    overview: "SpatialMath built a single-charge field scene so the learner can connect arrow direction, density, and particle motion to electric force.",
     sceneFocus: {
       concept: "electric field around a charge",
       primaryInsight: "Field arrows point away from positive charge and toward negative charge, while electron flow moves the opposite way.",
