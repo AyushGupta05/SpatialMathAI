@@ -309,7 +309,14 @@ function normalizeTutorActionStateInput(actionStateInput = [], fallback = {}) {
   };
 }
 
-function scheduleLessonAutoAdvance(message, actionState = {}) {
+const AFFIRMATION_PATTERN = /\b(excellent|perfect|great|well done|exactly|correct|nice work|good job|that's right|spot on|brilliant|fantastic|wonderful|nicely done|you got it|right)\b/i;
+
+function looksLikeAffirmation(text = "") {
+  const firstSentence = String(text || "").split(/[.!?\n]/)[0] || "";
+  return AFFIRMATION_PATTERN.test(firstSentence);
+}
+
+function scheduleLessonAutoAdvance(message, actionState = {}, responseText = "") {
   clearLessonAutoAdvanceTimer();
   const plan = activePlan();
   if (!message || !plan || isLessonComplete()) return;
@@ -319,13 +326,20 @@ function scheduleLessonAutoAdvance(message, actionState = {}) {
     return;
   }
 
+  const msgText = responseText || message?.querySelector?.(".chat-msg-bubble")?.textContent || "";
+  const affirmed = looksLikeAffirmation(msgText);
   lessonAutoAdvanceTimer = window.setTimeout(() => {
     if (latestTutorActionMessage !== message) return;
-    handleTutorAction({ kind: "show_connection" });
-  }, 1500);
+    if (affirmed) {
+      renderMessageActions(message, { ...actionState, actions: [] });
+      advanceLessonStage();
+    } else {
+      handleTutorAction({ kind: "show_connection" });
+    }
+  }, affirmed ? 2000 : 1500);
 }
 
-function renderMessageActions(message, actionStateInput = []) {
+function renderMessageActions(message, actionStateInput = [], responseText = "") {
   if (!message) return;
   const fallbackStage = getCurrentStage()?.learningStage || tutorState.learningStage || "orient";
   const actionState = normalizeTutorActionStateInput(actionStateInput, {
@@ -357,7 +371,7 @@ function renderMessageActions(message, actionStateInput = []) {
     row.appendChild(button);
   });
   message.querySelector(".chat-msg-bubble")?.appendChild(row);
-  scheduleLessonAutoAdvance(message, actionState);
+  scheduleLessonAutoAdvance(message, actionState, responseText);
 }
 
 function addTranscriptMessage(role, content, options = {}) {
@@ -2258,7 +2272,7 @@ async function sendTutorMessage(messageText, options = {}) {
         const actionState = options.resolveActions
           ? options.resolveActions(response, { plan, verdict, typing })
           : actionStateFromResponse(response, plan);
-        renderMessageActions(typing, actionState);
+        renderMessageActions(typing, actionState, streamedText || response.text);
         if (response.solutionReveal?.isSolutionReveal) {
           const solutionEl = solutionTranscriptElement(typing);
           if (solutionEl) {
