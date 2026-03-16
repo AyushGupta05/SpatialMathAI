@@ -70,8 +70,9 @@ export function buildSkewLinesDistancePlan(questionText, sourceSummary = {}) {
   const closest = closestPointsBetweenLines(line1.point, line1.direction, line2.point, line2.direction);
   if (!closest) return null;
 
-  const segment1 = lineSegmentFromPointDirection(line1.point, line1.direction, 5);
-  const segment2 = lineSegmentFromPointDirection(line2.point, line2.direction, 5);
+  const skewLineSpan = 6.5;
+  const segment1 = lineSegmentFromPointDirection(line1.point, line1.direction, skewLineSpan);
+  const segment2 = lineSegmentFromPointDirection(line2.point, line2.direction, skewLineSpan);
   const bounds = buildCoordinateBounds([
     line1.point,
     line2.point,

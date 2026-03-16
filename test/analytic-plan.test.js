@@ -123,6 +123,13 @@ test("buildAnalyticPlan creates a skew-lines lesson with the shortest segment", 
   assert.equal(plan.answerScaffold.formula, "distance = |(p2 - p1) · (v1 x v2)| / |v1 x v2|");
   assert.ok(Number(plan.analyticContext?.derivedValues?.distance) > 2.3);
   assert.ok(Number(plan.analyticContext?.derivedValues?.distance) < 2.31);
+  const lineOne = plan.objectSuggestions.find((item) => item.id === "line-one")?.object;
+  const lineOneLength = Math.hypot(
+    lineOne.params.end[0] - lineOne.params.start[0],
+    lineOne.params.end[1] - lineOne.params.start[1],
+    lineOne.params.end[2] - lineOne.params.start[2],
+  );
+  assert.ok(lineOneLength > 12.9);
 });
 
 test("buildAnalyticPlan accepts worksheet-style skew-lines prompts with unicode subscripts", () => {
