@@ -170,8 +170,12 @@ function showHint(label, payload = {}) {
 
 function analyticInitialActions(plan = {}, stage = null, learningState = {}) {
   const { revealFormula, revealFullSolution } = analyticActionFlags(plan, stage, learningState);
+  const primaryHintLabel = revealFormula || revealFullSolution ? "Give me a hint" : "What should I notice?";
   const actions = [
-    showHint(revealFormula || revealFullSolution ? "Give me a hint" : "What should I notice?"),
+    showHint(primaryHintLabel),
+    showHint("How do I start?"),
+    showHint("What am I missing?"),
+    showHint("Help me think about this"),
   ];
 
   if (revealFormula || revealFullSolution) {
@@ -190,21 +194,52 @@ function initialActionsForStage(plan = {}, stage = null, learningState = {}) {
 
   switch (stageType) {
     case "ORIENT":
-      return [showHint("What should I notice?")];
+      return [
+        showHint("What should I notice?"),
+        showHint("What should I focus on?"),
+        showHint("Give me a hint"),
+        showHint("Help me think about this"),
+      ];
     case "PREDICT":
-      return [showHint("How do I start?")];
+      return [
+        showHint("How do I start?"),
+        showHint("What should I notice?"),
+        showHint("Give me a hint"),
+      ];
     case "BUILD":
-      return [showHint("What should I place next?")];
+      return [
+        showHint("What should I place next?"),
+        showHint("What should I focus on?"),
+        showHint("Give me a hint"),
+        showHint("What am I missing?"),
+      ];
     case "CHECK":
       return hasFormula
-        ? [showHint("Give me a hint"), button("show_formula", "Show formula", "secondary")]
-        : [showHint("Give me a hint")];
+        ? [
+          showHint("Give me a hint"),
+          showHint("What am I missing?"),
+          button("show_formula", "Show formula", "secondary"),
+        ]
+        : [
+          showHint("Give me a hint"),
+          showHint("What am I missing?"),
+        ];
     case "REFLECT":
-      return [showHint("Help me think about this")];
+      return [
+        showHint("Help me think about this"),
+        showHint("What should I notice?"),
+      ];
     case "CHALLENGE":
       return hasFormula
-        ? [showHint("Give me a hint"), button("show_formula", "Show formula", "secondary")]
-        : [showHint("Give me a hint")];
+        ? [
+          showHint("Give me a hint"),
+          showHint("What am I missing?"),
+          button("show_formula", "Show formula", "secondary"),
+        ]
+        : [
+          showHint("Give me a hint"),
+          showHint("What am I missing?"),
+        ];
     case "ANALYTIC_AUTO":
       return analyticInitialActions(plan, stage, learningState);
     default:

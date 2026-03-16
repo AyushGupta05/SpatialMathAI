@@ -30,11 +30,13 @@ Return ONLY valid JSON with this exact shape:
 }
 
 Rules:
-- This gate is only used when concept verdict is CORRECT and praise is detected.
-- If the tutor also gives a forward cue (for example "now", "next", "continue", "move on"), prefer YES unless there is a clear unresolved blocker.
-- YES only when the learner is ready for the next stage now.
-- If there is unresolved confusion, missing prerequisites, or uncertainty, return NO.
-- Be conservative.
+- Consider ALL of the following as potential progression signals:
+  - The concept verdict is CORRECT.
+  - The tutor reply includes brief praise (for example "great", "excellent", "good", "well done").
+  - The tutor reply includes a forward cue (for example "now", "next", "continue", "move on").
+- Answer YES when at least ONE of these signals is present AND the learner appears ready for the next stage now.
+- Answer NO when there is unresolved confusion, missing prerequisites, or clear uncertainty, even if some signals are present.
+- Be conservative, but do not require all signals at once.
 - Never return anything except the JSON object.`;
 
 const FALLBACK_VERDICT = {
@@ -52,7 +54,13 @@ export function isTrivialInteraction(learningStage, userMessage) {
 
   const text = String(userMessage || "").trim();
   if (learningStage === "build") {
-    if (MATH_TOKEN_HINT.test(text) || SPATIAL_REASONING_HINT.test(text) || LABEL_SEQUENCE_HINT.test(text)) {
+    const shortButMeaningfulHint = /\b(parallel|perpendicular|intersect|intersection|skew|coplanar|same|different|bigger|smaller|increase|decrease|double|half|equal|not equal|match)\b/i;
+    if (
+      MATH_TOKEN_HINT.test(text)
+      || SPATIAL_REASONING_HINT.test(text)
+      || LABEL_SEQUENCE_HINT.test(text)
+      || shortButMeaningfulHint.test(text)
+    ) {
       return false;
     }
     const wordCount = text.split(/\s+/).filter(Boolean).length;
@@ -364,7 +372,11 @@ function parseProgressDecision(raw = "") {
 }
 
 export function hasPositiveTutorSignal(tutorReply = "") {
-  return PROGRESS_ACK_HINT.test(firstSentence(tutorReply));
+  const text = String(tutorReply || "").trim();
+  if (!text) return false;
+  // Many good tutor replies begin with context then praise; accept praise anywhere early.
+  const windowText = text.slice(0, 260);
+  return PROGRESS_ACK_HINT.test(windowText);
 }
 
 export async function evaluateStageProgression(input = {}, deps = {}) {
@@ -380,24 +392,6 @@ export async function evaluateStageProgression(input = {}, deps = {}) {
       layer1Matched,
       layer2Decision: "NO",
       reason: "No distinct next stage is available.",
-    };
-  }
-
-  if (!layer1Matched) {
-    return {
-      shouldProgress: false,
-      layer1Matched: false,
-      layer2Decision: "NO",
-      reason: "Tutor reply did not include a positive progression signal.",
-    };
-  }
-
-  if (verdict !== "CORRECT") {
-    return {
-      shouldProgress: false,
-      layer1Matched,
-      layer2Decision: "NO",
-      reason: `Concept verdict is ${verdict || "none"}, not CORRECT.`,
     };
   }
 
@@ -425,10 +419,13 @@ export async function evaluateStageProgression(input = {}, deps = {}) {
       temperature: 0,
     });
     const decision = parseProgressDecision(raw);
+    const layer2Decision = decision.decision;
+    const isCorrect = verdict === "CORRECT";
+    const anySignal = isCorrect || layer1Matched || layer2Decision === "YES";
     return {
-      shouldProgress: decision.decision === "YES",
-      layer1Matched: true,
-      layer2Decision: decision.decision,
+      shouldProgress: anySignal && layer2Decision === "YES",
+      layer1Matched,
+      layer2Decision,
       reason: decision.reason,
     };
   } catch (error) {

@@ -265,7 +265,7 @@ test("hasPositiveTutorSignal detects progression acknowledgements", () => {
   assert.equal(hasPositiveTutorSignal("Let's inspect one more detail first."), false);
 });
 
-test("evaluateStageProgression returns NO without layer-1 signal", async () => {
+test("evaluateStageProgression can progress based on CORRECT verdict even without layer-1 signal when gate says YES", async () => {
   let called = false;
   const result = await evaluateStageProgression({
     currentStage: { id: "stage-1", goal: "Read the setup" },
@@ -283,10 +283,10 @@ test("evaluateStageProgression returns NO without layer-1 signal", async () => {
     },
   });
 
-  assert.equal(called, false);
-  assert.equal(result.shouldProgress, false);
+  assert.equal(called, true);
   assert.equal(result.layer1Matched, false);
-  assert.equal(result.layer2Decision, "NO");
+  assert.equal(result.layer2Decision, "YES");
+  assert.equal(result.shouldProgress, true);
 });
 
 test("evaluateStageProgression respects layer-2 YES decision", async () => {
@@ -327,7 +327,7 @@ test("evaluateStageProgression respects layer-2 NO decision", async () => {
   assert.equal(result.shouldProgress, false);
 });
 
-test("evaluateStageProgression blocks when concept verdict is not CORRECT", async () => {
+test("evaluateStageProgression can progress on praise even when concept verdict is not CORRECT when gate says YES", async () => {
   let called = false;
   const result = await evaluateStageProgression({
     currentStage: { id: "stage-1", goal: "Read the setup" },
@@ -345,7 +345,7 @@ test("evaluateStageProgression blocks when concept verdict is not CORRECT", asyn
     },
   });
 
-  assert.equal(called, false);
-  assert.equal(result.shouldProgress, false);
-  assert.equal(result.layer2Decision, "NO");
+  assert.equal(called, true);
+  assert.equal(result.layer2Decision, "YES");
+  assert.equal(result.shouldProgress, true);
 });

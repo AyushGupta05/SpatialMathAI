@@ -160,14 +160,15 @@ export function buildConversationPreambleEvents({
   history = [],
   playbackMode = "auto",
   voiceId = null,
-  temperature = 0.3,
+  temperature = 0.25,
 }) {
   const events = [
     {
       event: {
         sessionStart: {
           inferenceConfiguration: {
-            maxTokens: 700,
+            // Give Nova Sonic more room to finish a full spoken thought.
+            maxTokens: 1200,
             temperature,
             topP: 0.9,
           },
