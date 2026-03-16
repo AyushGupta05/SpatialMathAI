@@ -31,43 +31,51 @@ AWS_SESSION_TOKEN=your_session_token
 
 The app still runs without Bedrock credentials, but multimodal planning, Sonic voice, and embedding-backed retrieval will fall back to the local non-AWS path.
 
+## Run
+
+```bash
+npm run dev
+```
+
+Then open `http://localhost:3000/index.html`.
+
 ## Architecture
 
 ### High-level system design
 
 ```text
-┌─────────────────────────────────────────────────────────────────┐
-│                           Frontend                              │
-│                     (Vanilla JS + Three.js)                     │
-│                                                                 │
-│  - Question input (text / image / screenshot)                   │
-│  - 3D scene rendering                                           │
-│  - Tutor panel                                                  │
-│  - Voice UI                                                     │
-│  - Hand tracking                                                │
-│  - KaTeX rendering                                              │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              │ HTTP / SSE
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                            Backend                              │
-│                      (Node.js + Hono API)                       │
-│                                                                 │
-│  - Request validation                                           │
-│  - Amazon Bedrock integration                                   │
-│  - Model orchestration / fallback                               │
-│  - SceneSpec generation                                         │
-│  - Tutor streaming                                              │
-│  - Voice pipeline coordination                                  │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                       Amazon Bedrock                            │
-│                                                                 │
-│  - Amazon Nova Multimodal Embeddings                            │
-│  - Amazon Nova Lite                                             │
-│  - Amazon Nova Sonic                                            │
-└─────────────────────────────────────────────────────────────────┘
++---------------------------------------------------------------+
+| Frontend                                                      |
+| Vanilla JS + Three.js                                         |
+|                                                               |
+| - Question input (text, image, screenshot)                    |
+| - 3D scene rendering                                          |
+| - Tutor panel                                                 |
+| - Voice UI                                                    |
+| - Hand tracking                                               |
+| - KaTeX rendering                                             |
++---------------------------------------------------------------+
+                           |
+                           | HTTP / SSE
+                           v
++---------------------------------------------------------------+
+| Backend                                                       |
+| Node.js + Hono API                                            |
+|                                                               |
+| - Request validation                                          |
+| - Amazon Bedrock integration                                  |
+| - Model orchestration and fallback                            |
+| - SceneSpec generation                                        |
+| - Tutor streaming                                             |
+| - Voice pipeline coordination                                 |
++---------------------------------------------------------------+
+                           |
+                           v
++---------------------------------------------------------------+
+| Amazon Bedrock                                                |
+|                                                               |
+| - Amazon Nova Multimodal Embeddings                           |
+| - Amazon Nova Lite                                            |
+| - Amazon Nova Sonic                                           |
++---------------------------------------------------------------+
 ```
