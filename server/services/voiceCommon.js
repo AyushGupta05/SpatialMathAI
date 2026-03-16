@@ -5,6 +5,7 @@ import { buildTutorSystemPrompt, buildFallbackTutorReply } from "./tutorPrompt.j
 export const OUTPUT_SAMPLE_RATE = 24000;
 export const INPUT_SAMPLE_RATE = 16000;
 export const DEFAULT_VOICE_ID = "matthew";
+export const VOICE_MAX_TOKENS = 5000;
 const conversationSessions = new Map();
 
 export function getVoiceConversationSession(conversationId = null) {
@@ -81,9 +82,10 @@ export function buildVoiceCoachPrompt(context = {}, session) {
   if (!context?.plan || !context?.sceneSnapshot) {
     return `You are SpatialMath, a spoken spatial-maths tutor in the style of 3Blue1Brown.
 - Speak warmly and curiously, like you're exploring an idea together.
-- Keep replies to 1-2 short sentences. Ask one guiding question.
-- Never give the answer directly. Point to what's in the scene and ask what they notice.
-- Reference specific shapes and measurements by name.`;
+- Answer the user's question directly and completely before adding guidance.
+- Use as many short spoken sentences as needed to finish one coherent thought, usually 2-5.
+- Ask a follow-up question only when it genuinely helps; do not force one every turn.
+- If there is no visible scene context yet, speak naturally instead of pretending there is one.`;
   }
 
   const assessment = evaluateBuild(context.plan, context.sceneSnapshot, context.contextStepId || null);
@@ -103,10 +105,11 @@ export function buildVoiceCoachPrompt(context = {}, session) {
 
 Voice style (3Blue1Brown-inspired):
 - You are speaking out loud. Be natural, warm, and conversational.
-- Guide with questions, not answers. "What do you think happens when..." or "Notice how..."
-- Never dump a full solution. Give the smallest nudge that moves understanding forward.
+- Answer direct conceptual questions before coaching the next step.
+- Guide with questions when helpful, not by default.
+- Never dump a full solution unless the learner asks for it, but do not stop before the main answer is complete.
 - If the learner asks for the answer directly, say: "Let's work through it. Look at the scene..."
-- One idea per reply. Let the scene do the heavy lifting.
+- Use enough short spoken sentences to finish the idea cleanly, usually 2-4.
 - Recent voice conversation:
 ${historyText || "No prior voice turns."}`;
 }
@@ -168,7 +171,7 @@ export function buildConversationPreambleEvents({
         sessionStart: {
           inferenceConfiguration: {
             // Give Nova Sonic more room to finish a full spoken thought.
-            maxTokens: 1200,
+            maxTokens: VOICE_MAX_TOKENS,
             temperature,
             topP: 0.9,
           },

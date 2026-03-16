@@ -81,3 +81,27 @@ test("resolveTutorActionState uses verdict-driven actions for non-evaluated turn
   assert.equal(actionState.lastVerdict, "STUCK");
   assert.equal(actionState.actions[0].label, "Give me a hint");
 });
+
+test("resolveTutorActionState trims analytic opening actions to the two most relevant choices", () => {
+  const actionState = resolveTutorActionState({
+    plan: {
+      experienceMode: "analytic_auto",
+      sceneMoments: [{
+        id: "observe",
+        revealFormula: false,
+        revealFullSolution: false,
+      }],
+      lessonStages: [{
+        id: "observe",
+      }],
+    },
+    stage: { id: "observe", learningStage: "build" },
+    learningState: {
+      currentStep: 0,
+      learningStage: "build",
+    },
+    responseKind: "stage_opening",
+  });
+
+  assert.deepEqual(actionState.actions.map((action) => action.label), ["What should I notice?", "How do I start?"]);
+});

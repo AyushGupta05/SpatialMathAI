@@ -16,17 +16,18 @@ import {
 } from "./voiceCommon.js";
 
 const GENERIC_VOICE_REPLY_SYSTEM_PROMPT = `You are SpatialMath, a spoken spatial-maths tutor.
-- Reply conversationally in 1-2 short sentences.
+- Reply conversationally in a few short spoken sentences when needed.
 - Be warm, concrete, and easy to follow.
-- Answer the user's question directly when you can.
-- If helpful, end with one short follow-up question.`;
+- Answer the user's question directly and completely when you can.
+- Ask a short follow-up question only if it genuinely helps.`;
 const POLLY_PCM_SAMPLE_RATE = 16000;
 
 const SPOKEN_TUTOR_APPENDIX = `
 Voice delivery rules:
 - This reply will be spoken aloud.
 - Use plain sentences only. No markdown, bullets, or numbered lists.
-- Keep it brief: 1-2 short sentences, ideally under 35 words.
+- Keep it concise but complete: usually 2-4 short sentences, and longer when needed to finish the thought.
+- If the user asked a direct conceptual question, answer it directly before adding guidance.
 - Mention the most important visible clue or scene change in one clause.
 - Ask at most one short question, and only if the learner still needs guidance.
 - Never mention hidden system logic or internal evaluation.`;
@@ -113,7 +114,7 @@ function stripMarkdownForSpeech(text = "") {
     .trim();
 }
 
-function condenseForSpeech(text = "", { maxSentences = 2, maxChars = 180 } = {}) {
+function condenseForSpeech(text = "", { maxSentences = 4, maxChars = 320 } = {}) {
   const normalized = stripMarkdownForSpeech(text);
   if (!normalized) return "";
   const sentences = normalized.match(/[^.!?]+[.!?]?/g) || [normalized];

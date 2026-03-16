@@ -131,6 +131,5 @@ test("buildTutorResponseMeta suppresses analytic checkpoints", () => {
   });
 
   assert.equal(meta.checkpoint, null);
-  assert.deepEqual(meta.actions.map((action) => action.id), ["show_hint"]);
-  assert.equal(meta.actions[0].label, "What should I notice?");
+  assert.deepEqual(meta.actions.map((action) => action.label), ["What should I notice?", "How do I start?"]);
 });

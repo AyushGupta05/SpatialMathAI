@@ -75,6 +75,7 @@ let analyticFormulaVisible = false;
 let analyticFullSolutionVisible = false;
 let analyticFormulaDismissed = false;
 let lastAppliedAnalyticStageId = null;
+let lastAppliedAnalyticCameraBookmarkId = null;
 let similarQuestionRequest = null;
 let stageWrapEl = null;
 let currentRepresentationMode = "3d";
@@ -868,6 +869,22 @@ function buildStageIntroMessage(plan = activePlan(), assessment = tutorState.lat
   return "The scene is yours to explore. What are you curious about?";
 }
 
+function normalizedTranscriptSnippet(text = "") {
+  return normalizeTutorReplyText(text)
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function shouldAnnounceStageAfterResponse(responseText = "", plan = activePlan()) {
+  if (!plan || !isAnalyticPlan(plan)) return true;
+  const stageIntro = buildStageIntroMessage(plan);
+  const normalizedResponse = normalizedTranscriptSnippet(responseText);
+  const normalizedStageIntro = normalizedTranscriptSnippet(stageIntro);
+  if (!normalizedResponse || !normalizedStageIntro) return true;
+  return !normalizedResponse.includes(normalizedStageIntro);
+}
+
 function updateComposerState() {
   const hasPlan = Boolean(activePlan());
   if (chatInput) {
@@ -1511,6 +1528,7 @@ function renderCameraBookmarks(plan = activePlan()) {
     button.className = "camera-bookmark-btn";
     button.textContent = bookmark.label;
     button.addEventListener("click", () => {
+      lastAppliedAnalyticCameraBookmarkId = bookmark.id || null;
       cameraDirector.animateTo(bookmark.position, bookmark.target, 900);
     });
     cameraBookmarkList.appendChild(button);
@@ -1587,9 +1605,16 @@ function applySceneDirective(sceneDirective = null, { forceCamera = false } = {}
   analyticOverlayManager?.render(plan, sceneDirective.visibleOverlayIds || []);
 
   const bookmark = (plan.cameraBookmarks || []).find((item) => item.id === sceneDirective.cameraBookmarkId);
-  if (bookmark && forceCamera) {
+  const bookmarkId = bookmark?.id || null;
+  const shouldAnimateCamera = Boolean(
+    bookmark
+    && forceCamera
+    && (!bookmarkId || bookmarkId !== lastAppliedAnalyticCameraBookmarkId)
+  );
+  if (shouldAnimateCamera) {
     cameraDirector.animateTo(bookmark.position, bookmark.target, 900);
   }
+  lastAppliedAnalyticCameraBookmarkId = bookmarkId;
 
   if (sceneDirective.focusTargets?.length) {
     focusStageTargets(sceneDirective.focusTargets, { selectFirst: true });
@@ -1798,6 +1823,7 @@ function setPlan(plan, options = {}) {
   analyticFullSolutionVisible = false;
   analyticFormulaDismissed = false;
   lastAppliedAnalyticStageId = null;
+  lastAppliedAnalyticCameraBookmarkId = null;
   similarQuestionRequest = null;
   currentSolutionSections = [];
   latestTutorActionMessage = null;
@@ -2175,7 +2201,7 @@ function applyVoiceTurnResult(response = {}, plan = activePlan()) {
   renderAssessment(plan ? tutorState.latestAssessment : null);
   renderSceneInfo();
   updateStageRail();
-  if (plan && !isLessonComplete()) {
+  if (plan && !isLessonComplete() && shouldAnnounceStageAfterResponse(assistantText, plan)) {
     announceCurrentStage();
   }
 }
@@ -2305,7 +2331,7 @@ async function sendTutorMessage(messageText, options = {}) {
         renderAssessment(plan ? tutorState.latestAssessment : null);
         renderSceneInfo();
         updateStageRail();
-        if (plan && !isLessonComplete()) {
+        if (plan && !isLessonComplete() && shouldAnnounceStageAfterResponse(response.text, plan)) {
           announceCurrentStage();
         }
 
@@ -3107,6 +3133,7 @@ function bindEvents() {
     analyticFullSolutionVisible = false;
     analyticFormulaDismissed = false;
     lastAppliedAnalyticStageId = null;
+    lastAppliedAnalyticCameraBookmarkId = null;
     similarQuestionRequest = null;
     currentSolutionSections = [];
     latestTutorActionMessage = null;
@@ -3348,5 +3375,4 @@ export function updateTutorLabels() {
   electricFieldManager?.update();
   syncUnfoldDrawer();
 }
-
 

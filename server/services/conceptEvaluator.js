@@ -35,8 +35,9 @@ Rules:
   - The tutor reply includes brief praise (for example "great", "excellent", "good", "well done").
   - The tutor reply includes a forward cue (for example "now", "next", "continue", "move on").
 - Answer YES when at least ONE of these signals is present AND the learner appears ready for the next stage now.
+- If the concept verdict is CORRECT, default to YES unless there is clear unresolved confusion, a missing prerequisite, or some other strong blocker.
 - Answer NO when there is unresolved confusion, missing prerequisites, or clear uncertainty, even if some signals are present.
-- Be conservative, but do not require all signals at once.
+- Reserve NO for strong blockers, not mild caution.
 - Never return anything except the JSON object.`;
 
 const FALLBACK_VERDICT = {
@@ -306,10 +307,6 @@ function buildEvaluationMessage({ stageGoal, learnerInput, prediction, learnerHi
   ].join("\n");
 }
 
-function firstSentence(text = "") {
-  return String(text || "").split(/[\n.!?]/)[0]?.trim() || "";
-}
-
 function hasForwardProgressCue(text = "") {
   return PROGRESS_FORWARD_CUE_HINT.test(String(text || ""));
 }
@@ -379,6 +376,12 @@ export function hasPositiveTutorSignal(tutorReply = "") {
   return PROGRESS_ACK_HINT.test(windowText);
 }
 
+function hasStrongProgressBlockSignal(text = "") {
+  const normalized = String(text || "").trim().toLowerCase();
+  if (!normalized) return false;
+  return /\b(unresolved|confus|uncertain|not ready|missing prerequisite|missing prereq|missing foundation|missing step|missing setup|incomplete|incorrect|wrong|misconception|still unclear|needs correction|revisit|retry|try again|verify first|check first|before continuing)\b/.test(normalized);
+}
+
 export async function evaluateStageProgression(input = {}, deps = {}) {
   const currentStageId = String(input?.currentStage?.id || "").trim();
   const nextStageId = String(input?.nextStage?.id || "").trim();
@@ -421,9 +424,14 @@ export async function evaluateStageProgression(input = {}, deps = {}) {
     const decision = parseProgressDecision(raw);
     const layer2Decision = decision.decision;
     const isCorrect = verdict === "CORRECT";
+    const strongBlock = layer2Decision === "NO" && (
+      hasStrongProgressBlockSignal(decision.reason)
+      || hasStrongProgressBlockSignal(input?.tutorReply || "")
+      || hasStrongProgressBlockSignal(input?.conceptVerdict?.gap || "")
+    );
     const anySignal = isCorrect || layer1Matched || layer2Decision === "YES";
     return {
-      shouldProgress: anySignal && layer2Decision === "YES",
+      shouldProgress: layer2Decision === "YES" || (isCorrect && !strongBlock && anySignal),
       layer1Matched,
       layer2Decision,
       reason: decision.reason,

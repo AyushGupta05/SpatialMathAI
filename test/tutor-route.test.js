@@ -427,8 +427,7 @@ test("POST /api/tutor keeps analytic opening actions hint-first before formula r
   assert.equal(meta.sceneDirective.cameraBookmarkId, "overview");
   assert.deepEqual(meta.sceneDirective.visibleOverlayIds, ["analytic-axes"]);
   assert.equal(meta?.checkpoint, null);
-  assert.equal(meta.actions[0].id, "show_hint");
-  assert.equal(meta.actions[0].label, "What should I notice?");
+  assert.deepEqual(meta.actions.map((action) => action.label), ["What should I notice?", "How do I start?"]);
 });
 
 test("POST /api/tutor unlocks analytic formula actions when the current moment reveals them", async () => {
@@ -455,10 +454,7 @@ test("POST /api/tutor unlocks analytic formula actions when the current moment r
   const payloads = parseSsePayloads(await response.text());
   const meta = payloads.find((entry) => entry.type === "meta")?.content;
 
-  const actionIds = meta.actions.map((action) => action.id);
-  assert.ok(actionIds.includes("show_hint"));
-  assert.ok(actionIds.includes("show_formula"));
-  assert.equal(meta.actions[0].label, "Give me a hint");
+  assert.deepEqual(meta.actions.map((action) => action.label), ["Give me a hint", "Show formula"]);
 });
 
 test("POST /api/tutor advances analytic scene directives to the next moment after a correct answer", async () => {
@@ -633,11 +629,7 @@ test("POST /api/tutor exposes the solution action on analytic final reveal stage
   const payloads = parseSsePayloads(await response.text());
   const meta = payloads.find((entry) => entry.type === "meta")?.content;
 
-  const finalActionIds = meta.actions.map((action) => action.id);
-  assert.ok(finalActionIds.includes("show_hint"));
-  assert.ok(finalActionIds.includes("show_formula"));
-  assert.ok(finalActionIds.includes("view_solution"));
-  assert.equal(meta.actions.at(-1).label, "Show solution");
+  assert.deepEqual(meta.actions.map((action) => action.label), ["Show formula", "Show solution"]);
 });
 
 test("POST /api/tutor escalates stuck analytic learners to the solution action only", async () => {

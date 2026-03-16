@@ -308,7 +308,7 @@ test("evaluateStageProgression respects layer-2 YES decision", async () => {
   assert.equal(result.shouldProgress, true);
 });
 
-test("evaluateStageProgression respects layer-2 NO decision", async () => {
+test("evaluateStageProgression still progresses on CORRECT when the NO reason is weak", async () => {
   const result = await evaluateStageProgression({
     currentStage: { id: "stage-1", goal: "Read the setup" },
     nextStage: { id: "stage-2", goal: "Use AB" },
@@ -320,6 +320,25 @@ test("evaluateStageProgression respects layer-2 NO decision", async () => {
     assessment: {},
   }, {
     converseWithModelFailover: async () => "{\"progress\":\"NO\",\"reason\":\"needs one more confirmation\"}",
+  });
+
+  assert.equal(result.layer1Matched, true);
+  assert.equal(result.layer2Decision, "NO");
+  assert.equal(result.shouldProgress, true);
+});
+
+test("evaluateStageProgression blocks CORRECT when the NO reason signals unresolved confusion", async () => {
+  const result = await evaluateStageProgression({
+    currentStage: { id: "stage-1", goal: "Read the setup" },
+    nextStage: { id: "stage-2", goal: "Use AB" },
+    learningState: { learningStage: "build" },
+    nextLearningStage: "build",
+    conceptVerdict: { verdict: "CORRECT" },
+    learnerInput: "AB = (4,0,0)",
+    tutorReply: "Excellent work, but there is still unresolved confusion about the setup.",
+    assessment: {},
+  }, {
+    converseWithModelFailover: async () => "{\"progress\":\"NO\",\"reason\":\"unresolved confusion about the prerequisite setup\"}",
   });
 
   assert.equal(result.layer1Matched, true);

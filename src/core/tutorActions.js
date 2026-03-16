@@ -170,22 +170,22 @@ function showHint(label, payload = {}) {
 
 function analyticInitialActions(plan = {}, stage = null, learningState = {}) {
   const { revealFormula, revealFullSolution } = analyticActionFlags(plan, stage, learningState);
-  const primaryHintLabel = revealFormula || revealFullSolution ? "Give me a hint" : "What should I notice?";
-  const actions = [
-    showHint(primaryHintLabel),
-    showHint("How do I start?"),
-    showHint("What am I missing?"),
-    showHint("Help me think about this"),
-  ];
-
-  if (revealFormula || revealFullSolution) {
-    actions.push(button("show_formula", "Show formula", "secondary"));
-  }
   if (revealFullSolution) {
-    actions.push(button("view_solution", "Show solution", "danger-muted"));
+    return [
+      button("show_formula", "Show formula", "secondary"),
+      button("view_solution", "Show solution", "danger-muted"),
+    ];
   }
-
-  return actions;
+  if (revealFormula) {
+    return [
+      showHint("Give me a hint"),
+      button("show_formula", "Show formula", "secondary"),
+    ];
+  }
+  return [
+    showHint("What should I notice?"),
+    showHint("How do I start?"),
+  ];
 }
 
 function initialActionsForStage(plan = {}, stage = null, learningState = {}) {
