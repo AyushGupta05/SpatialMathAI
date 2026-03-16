@@ -315,19 +315,14 @@ function scheduleLessonAutoAdvance(message, actionState = {}) {
   if (!message || !plan || isLessonComplete()) return;
 
   const hasShowConnection = actionState.actions?.some((action) => action.id === "show_connection");
-  const hasNextStage = actionState.actions?.some((action) => action.id === "next_stage");
-  if (actionState.lastVerdict !== "CORRECT" || !hasShowConnection || hasNextStage || !isAutoAdvanceEnabled(plan)) {
+  if (actionState.lastVerdict !== "CORRECT" || !hasShowConnection || !isAutoAdvanceEnabled(plan)) {
     return;
   }
 
   lessonAutoAdvanceTimer = window.setTimeout(() => {
     if (latestTutorActionMessage !== message) return;
-    renderMessageActions(message, {
-      ...actionState,
-      actions: [],
-    });
-    advanceLessonStage();
-  }, 3000);
+    handleTutorAction({ kind: "show_connection" });
+  }, 1500);
 }
 
 function renderMessageActions(message, actionStateInput = []) {

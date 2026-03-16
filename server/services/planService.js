@@ -123,12 +123,13 @@ export async function generateScenePlan({ questionText = "", imageAsset = null, 
 
   if (!usedAnalyticPlan && !usedElectricFieldPlan) {
     try {
+        const effectiveExemplar = retrieval.score >= 0.10 ? matchedExemplar : null;
         const novaPlan = await planFromNova({
           questionText: workingQuestion,
           mode,
           sceneSnapshot,
           sourceSummary,
-          exemplar: matchedExemplar,
+          exemplar: effectiveExemplar,
         });
         usedNovaPlan = true;
 

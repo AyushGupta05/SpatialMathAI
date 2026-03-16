@@ -200,10 +200,7 @@ function initialActionsForStage(plan = {}, stage = null, learningState = {}) {
   }
 }
 
-function actionsForCorrect(plan = {}) {
-  if (autoAdvanceEnabled(plan)) {
-    return [button("show_connection", "How does this connect?", "secondary")];
-  }
+function actionsForCorrect() {
   return [
     button("show_connection", "How does this connect?", "secondary"),
     button("next_stage", "I'm ready to continue", "primary"),

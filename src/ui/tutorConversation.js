@@ -20,6 +20,7 @@ const SHORT_FOLLOW_UP_PATTERNS = [
 
 const MATH_NOUN_PATTERN = /\b(angle|area|cone|coordinate|coordinates|cube|cuboid|cylinder|direction|distance|equation|find|height|intersect|intersection|line|normal|plane|point|radius|shortest|skew|sphere|surface area|vector|volume|width)\b/i;
 const MATH_STRUCTURE_PATTERN = /[=+\-*/^]|\([^()]*,[^()]*\)|\b\d+(?:\.\d+)?\b/;
+const ALGEBRA_PATTERN = /\b(system|equations?|matrix|matrices|determinant|solve\s+for|values?\s+of|simultaneous|linear\s+equations?|augmented|row\s+redu|infinitely\s+many|no\s+solutions?)\b/i;
 
 export function looksLikeShortFollowUp(text = "") {
   const normalized = normalizeText(text);
@@ -36,7 +37,8 @@ export function isStandaloneMathProblem(text = "") {
 
   const questionLike = /\?$/.test(normalized) || /\b(find|determine|calculate|compute|solve|what is|which)\b/i.test(normalized);
   const mathLike = MATH_NOUN_PATTERN.test(normalized) && MATH_STRUCTURE_PATTERN.test(normalized);
-  return mathLike || (questionLike && normalized.split(/\s+/).length >= 6 && MATH_NOUN_PATTERN.test(normalized));
+  const algebraLike = ALGEBRA_PATTERN.test(normalized) && MATH_STRUCTURE_PATTERN.test(normalized);
+  return mathLike || algebraLike || (questionLike && normalized.split(/\s+/).length >= 6 && (MATH_NOUN_PATTERN.test(normalized) || ALGEBRA_PATTERN.test(normalized)));
 }
 
 export function shouldStartLessonFromComposer({ text = "", hasPlan = false, lessonComplete = false } = {}) {

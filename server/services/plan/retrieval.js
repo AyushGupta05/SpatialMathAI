@@ -241,6 +241,24 @@ export const LESSON_EXEMPLARS = [
     representation_hint: "comparison_overlay",
     embedding: null,
   },
+  {
+    id: "system_of_equations",
+    title: "System of linear equations",
+    description: "Analysing a system of linear equations for consistency, unique solutions, no solution, or infinitely many solutions using row reduction or determinant methods.",
+    keywords: ["system of equations", "linear equations", "no solution", "infinitely many", "consistent", "inconsistent", "determinant", "row reduction", "augmented matrix", "rank", "variables", "simultaneous"],
+    lesson_type: "algebra",
+    representation_hint: "analytic_overlay",
+    embedding: null,
+  },
+  {
+    id: "matrix_operations",
+    title: "Matrix operations and determinants",
+    description: "Performing matrix multiplication, finding determinants, and connecting matrix properties to system solvability.",
+    keywords: ["matrix", "determinant", "multiplication", "inverse", "singular", "non-singular", "eigenvalue", "rank", "identity matrix"],
+    lesson_type: "algebra",
+    representation_hint: "analytic_overlay",
+    embedding: null,
+  },
 ];
 
 const EMBEDDING_READY_COUNT = LESSON_EXEMPLARS.length;
