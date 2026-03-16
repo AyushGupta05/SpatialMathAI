@@ -1575,6 +1575,14 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 5px; }
   gap: 6px;
   margin-top: 8px;
 }
+.tutor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 0.5px solid var(--color-border-tertiary, rgba(229, 231, 235, 0.12));
+}
 .chat-action-chip,
 .tutor-action-btn {
   padding: 6px 10px;
@@ -1596,6 +1604,35 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 5px; }
 .tutor-action-btn:disabled {
   opacity: 0.3;
   cursor: not-allowed;
+}
+.tutor-btn {
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 13px;
+  cursor: pointer;
+  border: 0.5px solid var(--color-border-secondary, rgba(229, 231, 235, 0.18));
+  background: var(--color-background-primary, rgba(8, 18, 34, 0.7));
+  color: var(--color-text-primary, #f2fbff);
+  transition: background 0.15s, opacity 0.15s;
+}
+.tutor-btn:hover {
+  background: var(--color-background-secondary, rgba(12, 24, 42, 0.92));
+}
+.tutor-btn--secondary {
+  background: transparent;
+}
+.tutor-btn--primary {
+  background: var(--accent-color, #6366f1);
+  color: #ffffff;
+  border-color: transparent;
+}
+.tutor-btn--primary:hover {
+  opacity: 0.9;
+}
+.tutor-btn--danger-muted {
+  background: var(--color-danger-subtle, rgba(239, 68, 68, 0.08));
+  color: var(--color-danger-muted, #b91c1c);
+  border-color: var(--color-danger-subtle, rgba(239, 68, 68, 0.15));
 }
 
 /* Checkpoint (subtle inline prompt) */
@@ -1826,6 +1863,20 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 5px; }
   text-align: center;
   line-height: 1.35;
 }
+.scene-label--axis {
+  box-shadow: none;
+  backdrop-filter: none;
+}
+.scene-label--tick {
+  padding: 1px 5px;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: rgba(229, 243, 255, 0.86);
+  background: rgba(4, 12, 24, 0.18);
+  border: 1px solid rgba(122, 160, 206, 0.12);
+  transform: translate(-50%, -105%);
+}
 
 /* ============ LOADING STATES ============ */
 .loading-dots::after {
@@ -1900,6 +1951,14 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 5px; }
   margin-bottom: 6px;
 }
 
+.formula-card {
+  background: var(--color-background-secondary, rgba(12, 24, 42, 0.92));
+  border: 0.5px solid var(--color-border-tertiary, rgba(229, 231, 235, 0.12));
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin: 8px 0;
+}
+
 .formula-display {
   overflow-x: auto;
 }
@@ -1926,6 +1985,18 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 5px; }
   color: var(--color-text-secondary, #6b7280);
   display: block;
   margin-bottom: 6px;
+}
+
+.step-description .chat-msg-paragraph,
+.step-result .chat-msg-paragraph,
+.solution-prose .chat-msg-paragraph {
+  color: inherit;
+}
+
+.step-description .chat-msg-paragraph + .chat-msg-paragraph,
+.step-result .chat-msg-paragraph + .chat-msg-paragraph,
+.solution-prose .chat-msg-paragraph + .chat-msg-paragraph {
+  margin-top: 0.35rem;
 }
 
 .step-math {

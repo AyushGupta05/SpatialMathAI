@@ -433,6 +433,7 @@ export function bootstrapApp() {
   function restoreMeshVisualState(mesh) {
     if (!mesh?.material) return;
     const isLine = mesh.userData?.shape === "line";
+    const isPointMarker = mesh.userData?.shape === "pointMarker";
     const baseOpacity = mesh.userData?.baseOpacity ?? (mesh.userData?.shape === "plane" ? 0.72 : 0.9);
     const faded = Boolean(mesh.userData?.containsNestedObject);
     const hovered = mesh === hoveredMesh;
@@ -449,6 +450,16 @@ export function bootstrapApp() {
       mesh.material.depthTest = false;
       mesh.material.depthWrite = false;
       mesh.renderOrder = selected ? 15 : hovered ? 14 : 9;
+    } else if (isPointMarker) {
+      transparent = true;
+      opacity = Math.max(
+        opacity,
+        selected ? 1 : hovered ? 0.98 : baseOpacity,
+      );
+      mesh.material.depthTest = false;
+      mesh.material.depthWrite = false;
+      mesh.renderOrder = selected ? 15 : hovered ? 14 : 12;
+      mesh.frustumCulled = false;
     } else {
       mesh.material.depthTest = true;
       mesh.material.depthWrite = !transparent;
@@ -457,7 +468,7 @@ export function bootstrapApp() {
 
     mesh.material.transparent = transparent;
     mesh.material.opacity = opacity;
-    if (!isLine) {
+    if (!isLine && !isPointMarker) {
       mesh.material.depthWrite = !mesh.material.transparent;
     }
     if (mesh.material.emissive) {
@@ -494,9 +505,9 @@ export function bootstrapApp() {
         mesh.material.transparent = true;
         mesh.material.opacity = Math.min(mesh.userData?.baseOpacity ?? 0.9, mesh.userData?.shape === "line" ? 0.28 : 0.16);
         mesh.material.depthWrite = false;
-        if (mesh.userData?.shape === "line") {
+        if (mesh.userData?.shape === "line" || mesh.userData?.shape === "pointMarker") {
           mesh.material.depthTest = false;
-          mesh.renderOrder = mesh === hoveredMesh ? 14 : 9;
+          mesh.renderOrder = mesh === hoveredMesh ? 14 : mesh.userData?.shape === "pointMarker" ? 12 : 9;
         }
       }
     }

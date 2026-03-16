@@ -12,13 +12,19 @@ import {
 } from "../ai/client.js";
 import { buildSceneSnapshotFromSuggestions, normalizeScenePlan } from "../ai/planSchema.js";
 import { computeGeometry } from "../core/geometry.js";
-import { buildSolutionRevealText, formatPlanFinalAnswer } from "../core/tutorSolution.js";
+import { formatPlanFinalAnswer } from "../core/tutorSolution.js";
 import { initLabelRenderer, renderLabels, addLabel, clearLabels } from "../render/labels.js";
 import { AnalyticOverlayManager } from "../render/analyticOverlayManager.js";
 import { CameraDirector } from "../render/cameraDirector.js";
 import { ElectricFieldManager } from "../render/electricFieldManager.js";
 import { supports2dCompanionShape } from "../ai/representationMode.js";
 import { tutorState } from "../state/tutorState.js";
+import {
+  currentVerdictEntry,
+  deriveHintTypeFromLabel,
+  isAutoAdvanceEnabled,
+  resolveTutorActionState,
+} from "../core/tutorActions.js";
 import { mergeRequiredSceneObjects, shouldSyncAnalyticScene } from "./sceneDirectiveSync.js";
 import { initUnfoldDrawer, setUnfoldRepresentationMode, syncUnfoldDrawer } from "./unfoldDrawer.js";
 import { hasMathMarkup, renderMathBlockHtml, renderRichTextHtml } from "./mathMarkup.js";
@@ -27,7 +33,6 @@ import { PcmAudioPlayer } from "./pcmAudioPlayer.js";
 import { hideEvidence, initEvidencePanel, registerEvidenceAutoClose, showEvidence } from "./evidencePanel.js";
 import { extractPastedQuestionImageFile } from "./questionImage.js";
 import {
-  buildSuggestedQuestionActions,
   normalizeTutorReplyText,
   shouldStartLessonFromComposer,
 } from "./tutorConversation.js";
@@ -69,7 +74,6 @@ let analyticFullSolutionVisible = false;
 let analyticFormulaDismissed = false;
 let lastAppliedAnalyticStageId = null;
 let similarQuestionRequest = null;
-let lastCompletionPromptKey = null;
 let stageWrapEl = null;
 let currentRepresentationMode = "3d";
 
@@ -119,6 +123,39 @@ let solutionDrawerAnswerValue;
 let solutionDrawerSteps;
 let solutionDrawerClose;
 let newQuestionBtn;
+let latestTutorActionMessage = null;
+let latestTutorActionState = { actions: [], stageType: "orient", lastVerdict: null };
+let lessonAutoAdvanceTimer = null;
+let currentSolutionSections = [];
+
+function clearLessonAutoAdvanceTimer() {
+  if (lessonAutoAdvanceTimer) {
+    window.clearTimeout(lessonAutoAdvanceTimer);
+    lessonAutoAdvanceTimer = null;
+  }
+}
+
+function resetComposerPulse() {
+  chatInput?.classList.remove("input--awaiting");
+  if (chatInput) {
+    void chatInput.offsetWidth;
+    chatInput.classList.add("input--awaiting");
+  }
+}
+
+function focusComposerWithPlaceholder(placeholder = "") {
+  awaitingLearnerResponse = true;
+  if (chatInput) {
+    chatInput.disabled = false;
+    if (placeholder) {
+      chatInput.placeholder = placeholder;
+    }
+    chatInput.focus();
+  }
+  if (chatSend) chatSend.disabled = false;
+  setVoiceButtonState({ active: voiceModeEnabled, disabled: false });
+  resetComposerPulse();
+}
 
 function formatNumber(value, digits = 2) {
   const next = Number(value);
@@ -171,10 +208,6 @@ function defaultRepresentationDirective(plan = activePlan()) {
 
 function isLessonComplete() {
   return Boolean(tutorState.completionState?.complete);
-}
-
-function suggestionActions() {
-  return buildSuggestedQuestionActions(tutorState.similarQuestions || []);
 }
 
 function completionPromptKey(plan = activePlan(), suggestions = tutorState.similarQuestions || []) {
@@ -257,22 +290,76 @@ function updateMathPreview(previewEl, content = "") {
   previewEl.innerHTML = shouldShow ? renderRichTextHtml(normalized) : "";
 }
 
-function renderMessageActions(message, actions = []) {
+function normalizeTutorActionStateInput(actionStateInput = [], fallback = {}) {
+  if (Array.isArray(actionStateInput)) {
+    return {
+      actions: actionStateInput,
+      stageType: fallback.stageType || "orient",
+      lastVerdict: fallback.lastVerdict || null,
+    };
+  }
+
+  return {
+    actions: Array.isArray(actionStateInput?.actions) ? actionStateInput.actions : [],
+    stageType: actionStateInput?.stageType || fallback.stageType || "orient",
+    lastVerdict: actionStateInput?.lastVerdict || fallback.lastVerdict || null,
+  };
+}
+
+function scheduleLessonAutoAdvance(message, actionState = {}) {
+  clearLessonAutoAdvanceTimer();
+  const plan = activePlan();
+  if (!message || !plan || isLessonComplete()) return;
+
+  const hasShowConnection = actionState.actions?.some((action) => action.id === "show_connection");
+  const hasNextStage = actionState.actions?.some((action) => action.id === "next_stage");
+  if (actionState.lastVerdict !== "CORRECT" || !hasShowConnection || hasNextStage || !isAutoAdvanceEnabled(plan)) {
+    return;
+  }
+
+  lessonAutoAdvanceTimer = window.setTimeout(() => {
+    if (latestTutorActionMessage !== message) return;
+    renderMessageActions(message, {
+      ...actionState,
+      actions: [],
+    });
+    advanceLessonStage();
+  }, 3000);
+}
+
+function renderMessageActions(message, actionStateInput = []) {
   if (!message) return;
-  message.querySelector(".chat-msg-actions")?.remove();
-  if (!actions.length) return;
+  const fallbackStage = getCurrentStage()?.learningStage || tutorState.learningStage || "orient";
+  const actionState = normalizeTutorActionStateInput(actionStateInput, {
+    stageType: fallbackStage,
+    lastVerdict: null,
+  });
+
+  clearLessonAutoAdvanceTimer();
+  chatMessages?.querySelectorAll(".tutor-actions").forEach((row) => row.remove());
+  latestTutorActionMessage = message;
+  latestTutorActionState = {
+    actions: actionState.actions.map((action) => ({ ...action })),
+    stageType: actionState.stageType,
+    lastVerdict: actionState.lastVerdict,
+  };
+  if (!actionState.actions.length) return;
 
   const row = document.createElement("div");
-  row.className = "chat-msg-actions";
-  actions.forEach((action) => {
+  row.className = "tutor-actions";
+  row.dataset.stage = String(actionState.stageType || "orient").toLowerCase();
+  row.dataset.verdict = String(actionState.lastVerdict || "none").toLowerCase();
+  actionState.actions.forEach((action) => {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "chat-action-chip";
+    button.className = `tutor-btn tutor-btn--${action.style || "secondary"}`;
+    button.dataset.action = action.id;
     button.textContent = action.label;
     button.addEventListener("click", () => handleTutorAction(action));
     row.appendChild(button);
   });
   message.querySelector(".chat-msg-bubble")?.appendChild(row);
+  scheduleLessonAutoAdvance(message, actionState);
 }
 
 function addTranscriptMessage(role, content, options = {}) {
@@ -299,6 +386,8 @@ function addTranscriptMessage(role, content, options = {}) {
   chatMessages.appendChild(message);
 
   if (options.actions?.length) {
+    renderMessageActions(message, options.actions);
+  } else if (options.actions && !Array.isArray(options.actions)) {
     renderMessageActions(message, options.actions);
   }
 
@@ -652,78 +741,26 @@ function fillPreviewActionObjectSpec(action, plan = activePlan(), assessment = t
   };
 }
 
-function stageActionsForClient(plan = activePlan(), assessment = tutorState.latestAssessment) {
-  if (!plan) return [];
-  if (isLessonComplete()) {
-    return suggestionActions();
-  }
-
-  const stage = currentLessonStage(plan);
-  if (isAnalyticPlan(plan)) {
-    const analyticActions = [];
-    const moment = currentSceneMoment(plan);
-    const sceneIndex = Math.max(0, (plan.sceneMoments || []).findIndex((m) => m.id === moment?.id));
-    const hasNext = sceneIndex < Math.max((plan.sceneMoments || []).length - 1, 0);
-    if (!moment?.revealFormula) {
-      analyticActions.push({
-        id: `${stage?.id || "analytic"}-formula`,
-        label: "Show Formula",
-        kind: "show-formula",
-        payload: { stageId: stage?.id || null },
-      });
-    }
-    if (hasNext) {
-      analyticActions.push({
-        id: `${stage?.id || "analytic"}-next`,
-        label: "What's next?",
-        kind: "reveal-next-step",
-        payload: { stageId: stage?.id || null },
-      });
-    }
-    analyticActions.push({
-      id: `${stage?.id || "analytic"}-solution`,
-      label: "View Solution",
-      kind: "reveal-full-solution",
-      payload: { stageId: stage?.id || null },
-    });
-    return analyticActions;
-  }
-  const learningStage = tutorState.learningStage;
-  const hintAction = {
-    id: `${stage?.id || learningStage}-explain`,
-    label: learningStage === "orient" ? "Give me a hint" : "I'm stuck",
-    kind: "explain-stage",
-    payload: { stageId: stage?.id || null },
-  };
-  const continueAction = {
-    id: `${stage?.id || learningStage}-continue`,
-    label: learningStage === "reflect" ? "Keep exploring" : "I think I see it",
-    kind: "continue-stage",
-    payload: { stageId: stage?.id || null },
-  };
-  const previewAction = fillPreviewActionObjectSpec(
-    stage?.suggestedActions?.find((action) => action.kind === "preview-required-object")
-      || {
-        id: `${stage?.id || "lesson"}-preview`,
-        label: nextRequiredSuggestion(plan, assessment)?.title
-          ? `Show me ${nextRequiredSuggestion(plan, assessment).title}`
-          : "Show me in the scene",
-        kind: "preview-required-object",
-        payload: {
-          stageId: stage?.id || null,
-          suggestionId: nextRequiredSuggestion(plan, assessment)?.id || null,
-        },
-      },
+function stageActionsForClient(plan = activePlan(), _assessment = tutorState.latestAssessment) {
+  if (!plan) return { actions: [], stageType: "orient", lastVerdict: null };
+  const stage = getCurrentStage(plan);
+  const learningState = tutorState.snapshot();
+  const currentVerdict = currentVerdictEntry(learningState);
+  const responseKind = isLessonComplete()
+    ? "lesson_complete"
+    : currentVerdict?.verdict
+      ? "verdict"
+      : stage?.requires_evaluation === false
+        ? "non_evaluated"
+        : "stage_opening";
+  return resolveTutorActionState({
     plan,
-    assessment
-  );
-
-  const actions = [];
-  if (previewAction?.payload?.objectSpec) {
-    actions.push(previewAction);
-  }
-  actions.push(hintAction, continueAction);
-  return actions.slice(0, 3);
+    stage,
+    learningState,
+    conceptVerdict: currentVerdict,
+    completionState: tutorState.completionState,
+    responseKind,
+  });
 }
 
 function buildSystemContextMessage(plan = activePlan()) {
@@ -806,23 +843,11 @@ function setCheckpointState(checkpoint = null) {
   chatCheckpointPrompt.textContent = checkpoint.prompt || "Does this look correct?";
 }
 
-function announceCompletionOptions() {
-  const plan = activePlan();
-  const actions = suggestionActions();
-  const key = completionPromptKey(plan, tutorState.similarQuestions || []);
-  if (!plan || !isLessonComplete() || !actions.length || !key || key === lastCompletionPromptKey) return;
-  lastCompletionPromptKey = key;
-  addTranscriptMessage("tutor", "This question is wrapped. Ask a follow-up, or try one of these similar prompts.", {
-    actions,
-  });
-}
-
 async function fetchSimilarQuestionsOnce() {
   const plan = activePlan();
   const requestedPlanKey = completionPromptKey(plan, []);
   if (!plan || !isLessonComplete()) return;
   if (tutorState.similarQuestions?.length) {
-    announceCompletionOptions();
     return;
   }
   if (similarQuestionRequest) {
@@ -834,7 +859,6 @@ async function fetchSimilarQuestionsOnce() {
     .then((payload) => {
       if (completionPromptKey(activePlan(), []) !== requestedPlanKey) return;
       tutorState.setSimilarQuestions(payload?.suggestions || []);
-      announceCompletionOptions();
     })
     .catch((error) => {
       console.error("Similar tutor questions failed:", error);
@@ -848,6 +872,7 @@ async function fetchSimilarQuestionsOnce() {
 }
 
 function completeLesson({ reason = "correct-answer", revealSolution = false } = {}) {
+  clearLessonAutoAdvanceTimer();
   tutorState.setCompletionState({ complete: true, reason });
   tutorState.setPhase("complete");
   tutorState.setSimilarQuestions(tutorState.similarQuestions || []);
@@ -1130,7 +1155,7 @@ function renderSolutionSections(sections = []) {
   return sections.map((section) => {
     switch (section.type) {
       case "prose":
-        return `<p class="solution-prose">${renderRichTextHtml(section.text || "")}</p>`;
+        return `<div class="solution-prose">${renderRichTextHtml(section.text || "")}</div>`;
 
       case "formula":
         return `
@@ -1146,7 +1171,7 @@ function renderSolutionSections(sections = []) {
         return `
           <div class="solution-step">
             <span class="step-label">${escapeHtml(section.label || "Step")}</span>
-            <span class="step-description">${escapeHtml(section.description || "")}</span>
+            <div class="step-description">${renderRichTextHtml(section.description || "")}</div>
             ${section.tex
               ? `<div class="step-math">${renderMathBlockHtml(section.tex, { displayMode: true })}</div>`
               : ""}
@@ -1163,7 +1188,7 @@ function renderSolutionSections(sections = []) {
             <div class="answer-math">
               ${renderMathBlockHtml(section.tex || section.plain || "", { displayMode: true })}
             </div>
-            ${section.plain ? `<span class="step-result">${escapeHtml(section.plain)}</span>` : ""}
+            ${section.plain ? `<div class="step-result">${renderRichTextHtml(section.plain)}</div>` : ""}
           </div>
         `;
 
@@ -1173,29 +1198,34 @@ function renderSolutionSections(sections = []) {
   }).join("");
 }
 
-function revealWorkedSolution(plan = activePlan(), { announceInTranscript = true } = {}) {
+function latestVerdictGap() {
+  return currentVerdictEntry(tutorState.snapshot())?.gap || null;
+}
+
+function solutionTranscriptElement(message = null) {
+  const target = message || latestTutorActionMessage;
+  return transcriptMessageTextNode(target);
+}
+
+function scrollFormulaCardIntoView() {
+  if (!formulaCard || formulaCard.classList.contains("hidden")) return;
+  formulaCard.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+async function revealWorkedSolution(plan = activePlan()) {
   if (!plan) return;
-
-  analyticFormulaVisible = true;
-  analyticFullSolutionVisible = true;
-  analyticFormulaDismissed = false;
-
-  if (isAnalyticPlan(plan) && tutorState.currentStep < plan.lessonStages.length - 1) {
-    tutorState.goToStep(plan.lessonStages.length - 1);
-  }
-
-  if (isAnalyticPlan(plan)) {
-    applyAnalyticSceneState({ forceCamera: true });
-  }
-
-  renderAnalyticPanels(plan);
-  completeLesson({ reason: "revealed-solution", revealSolution: true });
-
-  if (announceInTranscript) {
-    const revealText = buildSolutionRevealText(plan);
-    addTranscriptMessage("tutor", revealText, { completion: true });
-    tutorState.addMessage("assistant", revealText);
-  }
+  currentSolutionSections = [];
+  tutorState.addLearnerEvent({
+    stage: tutorState.currentStep,
+    event: "view_solution_clicked",
+    hint_count: tutorState.hint_state.current_stage_hints,
+  });
+  await sendTutorMessage({
+    ...buildTutorPayload("show me the solution"),
+    hint_state: { ...(tutorState.hint_state || {}) },
+  }, {
+    showUserMessage: false,
+  });
 }
 
 function renderAnalyticPanels(plan = activePlan()) {
@@ -1215,15 +1245,21 @@ function renderAnalyticPanels(plan = activePlan()) {
 
   if (formulaCardTitle) formulaCardTitle.textContent = analytic.formulaCard?.title || "Relevant Formula";
   if (formulaCardEquation) {
-    formulaCardEquation.innerHTML = renderMathBlockHtml(analytic.formulaCard?.formula || plan.answerScaffold?.formula || "", {
-      displayMode: true,
-    });
+    try {
+      formulaCardEquation.innerHTML = renderMathBlockHtml(analytic.formulaCard?.formula || plan.answerScaffold?.formula || "", {
+        displayMode: true,
+      });
+    } catch {
+      formulaCardEquation.textContent = analytic.formulaCard?.formula || plan.answerScaffold?.formula || "";
+    }
   }
   if (formulaCardExplanation) {
     formulaCardExplanation.innerHTML = renderRichTextHtml(analytic.formulaCard?.explanation || plan.answerScaffold?.explanation || "");
   }
   if (formulaCardRevealBtn) {
-    formulaCardRevealBtn.textContent = showSolutionDrawer ? "Hide Full Solution" : "Reveal Full Solution";
+    const canRevealSolution = showSolutionDrawer || tutorState.hint_state?.escalate_next === true;
+    formulaCardRevealBtn.classList.toggle("hidden", !canRevealSolution);
+    formulaCardRevealBtn.textContent = showSolutionDrawer ? "Hide Full Solution" : "Show me the solution";
   }
 
   if (showSolutionDrawer && solutionDrawerTitle && solutionDrawerSteps) {
@@ -1232,7 +1268,7 @@ function renderAnalyticPanels(plan = activePlan()) {
       solutionDrawerAnswer.classList.add("hidden");
       solutionDrawerAnswerValue.innerHTML = "";
     }
-    solutionDrawerSteps.innerHTML = renderSolutionSections(solutionSectionsForPlan(plan));
+    solutionDrawerSteps.innerHTML = renderSolutionSections(currentSolutionSections.length ? currentSolutionSections : solutionSectionsForPlan(plan));
   }
 }
 
@@ -1385,10 +1421,11 @@ function renderAssessment(assessment) {
 
   if (isAnalyticPlan()) {
     const currentMoment = currentSceneMoment();
+    const formulaText = activePlan()?.analyticContext?.formulaCard?.formula || activePlan()?.answerScaffold?.formula || "";
     sceneValidation.innerHTML = `
       <div class="validation-stat"><strong>Auto scene ready</strong></div>
       <div class="validation-stat"><strong>${escapeHtml(currentMoment?.title || "Observe")}</strong><br />${escapeHtml(currentMoment?.goal || assessment.guidance?.coachFeedback || "Use the visible scene to reason.")}</div>
-      <div class="validation-stat"><strong>Formula</strong><br />${escapeHtml(activePlan()?.analyticContext?.formulaCard?.formula || activePlan()?.answerScaffold?.formula || "Reveal when ready")}</div>
+      <div class="validation-stat"><strong>Formula</strong><br />${formulaText ? renderMathBlockHtml(formulaText, { displayMode: true }) : "Reveal when ready"}</div>
     `;
     return;
   }
@@ -1609,8 +1646,15 @@ function announceCurrentStage(force = false) {
     applyRepresentationDirective(sceneDirectiveForCurrentMoment(plan));
     focusStageTargets(stageFocusTargets(plan), { selectFirst: tutorState.learningStage === "build" });
   }
+  const actionState = resolveTutorActionState({
+    plan,
+    stage: getCurrentStage(plan),
+    learningState: tutorState.snapshot(),
+    completionState: tutorState.completionState,
+    responseKind: "stage_opening",
+  });
   addTranscriptMessage("tutor", buildStageIntroMessage(plan), {
-    actions: stageActionsForClient(plan),
+    actions: actionState,
   });
 }
 
@@ -1684,6 +1728,7 @@ function scheduleAssessment() {
 function setPlan(plan, options = {}) {
   const normalizedPlan = normalizeScenePlan(plan);
   void resetVoiceSessionState();
+  clearLessonAutoAdvanceTimer();
   lastAnnouncedStageKey = null;
   lastCheckpointKey = null;
   analyticFormulaVisible = false;
@@ -1691,7 +1736,9 @@ function setPlan(plan, options = {}) {
   analyticFormulaDismissed = false;
   lastAppliedAnalyticStageId = null;
   similarQuestionRequest = null;
-  lastCompletionPromptKey = null;
+  currentSolutionSections = [];
+  latestTutorActionMessage = null;
+  latestTutorActionState = { actions: [], stageType: "orient", lastVerdict: null };
   tutorState.setPlan(normalizedPlan, { mode: options.mode || normalizedPlan.problem?.mode || "guided" });
   tutorState.setPhase(isAnalyticPlan(normalizedPlan) ? "guided_build" : "plan_ready");
   tutorState.setLearningStage(isAnalyticPlan(normalizedPlan) ? "build" : "orient");
@@ -1741,7 +1788,6 @@ async function handleQuestionSubmit(overrides = {}) {
   analyticFullSolutionVisible = false;
   analyticFormulaDismissed = false;
   similarQuestionRequest = null;
-  lastCompletionPromptKey = null;
   analyticOverlayManager?.clear();
   hideEvidence();
   renderAnalyticPanels(null);
@@ -1884,6 +1930,9 @@ function returnControlToLearner(context = {}) {
   ) {
     placeholder = "Walk me through it in your own words.";
   }
+  if (isLessonComplete()) {
+    placeholder = "What would you like to explore?";
+  }
   if (context.verdict === "CORRECT" && context.stage) {
     const checkpointPrompt = context.stage.checkpoint?.prompt || context.stage.checkpointPrompt || "";
     if (checkpointPrompt) {
@@ -1966,6 +2015,23 @@ function syncLearningStageFromTutorResponse(response = {}, plan = activePlan()) 
   }
 }
 
+function actionStateFromResponse(response = {}, plan = activePlan()) {
+  if (Array.isArray(response.actions) || response.actionState) {
+    return {
+      actions: Array.isArray(response.actions) ? response.actions : [],
+      stageType: response.actionState?.stageType || getCurrentStage(plan)?.learningStage || tutorState.learningStage,
+      lastVerdict: response.actionState?.lastVerdict || response.conceptVerdict?.verdict || null,
+    };
+  }
+  return stageActionsForClient(plan, tutorState.latestAssessment);
+}
+
+function syncSolutionRevealState(response = {}) {
+  if (Array.isArray(response.solutionReveal?.sections)) {
+    currentSolutionSections = response.solutionReveal.sections;
+  }
+}
+
 function applyVoiceTurnResult(response = {}, plan = activePlan()) {
   const draft = voiceStreamDraft;
   const inputTranscript = String(response.inputTranscript || "").trim();
@@ -1978,12 +2044,13 @@ function applyVoiceTurnResult(response = {}, plan = activePlan()) {
     tutorState.addMessage("assistant", assistantText);
   }
 
+  const verdictStage = tutorState.learningStage;
   syncStepFromTutorResponse(response, plan);
   syncLearningStageFromTutorResponse(response, plan);
 
   if (response.conceptVerdict) {
     tutorState.addVerdict({
-      stage: tutorState.learningStage,
+      stage: verdictStage,
       stageGoal: response.conceptVerdict.stageGoal || "",
       verdict: response.conceptVerdict.verdict,
       what_was_right: response.conceptVerdict.what_was_right,
@@ -2007,14 +2074,20 @@ function applyVoiceTurnResult(response = {}, plan = activePlan()) {
     });
   }
 
-  const actions = response.actions?.length
-    ? response.actions
-    : plan
-      ? stageActionsForClient(plan, tutorState.latestAssessment)
-      : [];
+  syncSolutionRevealState(response);
+
+  const actionState = plan
+    ? actionStateFromResponse(response, plan)
+    : { actions: [], stageType: tutorState.learningStage, lastVerdict: null };
   if (draft?.assistantMessage) {
     draft.assistantMessage.dataset.completion = response.completionState?.complete ? "true" : "false";
-    renderMessageActions(draft.assistantMessage, actions);
+    renderMessageActions(draft.assistantMessage, actionState);
+    if (response.solutionReveal?.isSolutionReveal) {
+      const solutionEl = solutionTranscriptElement(draft.assistantMessage);
+      if (solutionEl) {
+        solutionEl.innerHTML = renderRichTextHtml(assistantText);
+      }
+    }
   }
 
   if (response.focusTargets?.length) {
@@ -2107,12 +2180,14 @@ async function sendTutorMessage(messageText, options = {}) {
           completion: Boolean(response.completionState?.complete),
         });
 
+        syncSolutionRevealState(response);
+        const verdictStage = tutorState.learningStage;
         syncStepFromTutorResponse(response, plan);
         syncLearningStageFromTutorResponse(response, plan);
 
         if (conceptVerdict?.verdict) {
           tutorState.addVerdict({
-            stage: tutorState.learningStage,
+            stage: verdictStage,
             stageGoal: conceptVerdict.stageGoal || "",
             verdict: conceptVerdict.verdict,
             what_was_right: conceptVerdict.what_was_right,
@@ -2128,8 +2203,16 @@ async function sendTutorMessage(messageText, options = {}) {
           });
         }
 
-        const actions = response.actions?.length ? response.actions : stageActionsForClient(plan, tutorState.latestAssessment);
-        renderMessageActions(typing, actions);
+        const actionState = options.resolveActions
+          ? options.resolveActions(response, { plan, verdict, typing })
+          : actionStateFromResponse(response, plan);
+        renderMessageActions(typing, actionState);
+        if (response.solutionReveal?.isSolutionReveal) {
+          const solutionEl = solutionTranscriptElement(typing);
+          if (solutionEl) {
+            solutionEl.innerHTML = renderRichTextHtml(accumulatedTutorText || response.text);
+          }
+        }
         tutorState.addMessage("assistant", response.text);
 
         if (response.assessment?.summary) {
@@ -2160,6 +2243,7 @@ async function sendTutorMessage(messageText, options = {}) {
           announceCurrentStage();
         }
 
+        await options.afterResponse?.(response, { plan, verdict, typing });
         returnControlToLearner({
           verdict,
           stage: pendingStage,
@@ -2187,6 +2271,68 @@ async function handleExplain() {
     input_source: "text",
     user_label: "I need a hint",
   });
+}
+
+async function requestTutorHint(action = {}) {
+  const gap = action.payload?.gap || latestVerdictGap();
+  const hintType = action.payload?.hint_type || deriveHintTypeFromLabel(action.label || "");
+  await sendTutorMessage({
+    ...buildTutorPayload("__hint_request__"),
+    userMessage: "__hint_request__",
+    requires_evaluation: false,
+    hint_type: hintType,
+    gap: hintType === "gap" ? gap || "" : "",
+    hint_level: tutorState.hint_state.current_stage_hints,
+    hint_state: { ...(tutorState.hint_state || {}) },
+  }, {
+    showUserMessage: false,
+    resolveActions: () => latestTutorActionState,
+  });
+}
+
+async function requestConnectionBridge(plan = activePlan()) {
+  const nextStageActionState = resolveTutorActionState({
+    plan,
+    stage: getCurrentStage(plan),
+    learningState: tutorState.snapshot(),
+    conceptVerdict: { verdict: "CORRECT" },
+    completionState: tutorState.completionState,
+    responseKind: "connection_followup",
+  });
+  await sendTutorMessage({
+    ...buildTutorPayload("__connection_request__"),
+    userMessage: "__connection_request__",
+    requires_evaluation: false,
+    hint_state: { ...(tutorState.hint_state || {}) },
+  }, {
+    showUserMessage: false,
+    resolveActions: () => (isAutoAdvanceEnabled(plan) ? {
+      ...latestTutorActionState,
+      actions: [],
+    } : nextStageActionState),
+    afterResponse: async (_response, { typing }) => {
+      if (!isAutoAdvanceEnabled(plan)) return;
+      clearLessonAutoAdvanceTimer();
+      lessonAutoAdvanceTimer = window.setTimeout(() => {
+        if (latestTutorActionMessage !== typing) return;
+        renderMessageActions(typing, {
+          ...latestTutorActionState,
+          actions: [],
+        });
+        advanceLessonStage();
+      }, 2000);
+    },
+  });
+}
+
+async function loadSimilarProblem(plan = activePlan()) {
+  if (!plan) return;
+  const suggestions = tutorState.similarQuestions?.length
+    ? tutorState.similarQuestions
+    : (await requestSimilarTutorQuestions({ plan, limit: 1 }))?.suggestions || [];
+  const nextPrompt = suggestions[0]?.prompt || "";
+  if (!nextPrompt) return;
+  await handleQuestionSubmit({ questionText: nextPrompt, imageFile: null });
 }
 
 async function handleComposerSubmit() {
@@ -2655,16 +2801,49 @@ async function handleTutorAction(action = {}) {
     case "highlight-key-idea":
       applyAnalyticSceneState({ forceCamera: true });
       break;
+    case "show_formula":
     case "show-formula":
+      if (analyticFormulaVisible && !formulaCard?.classList.contains("hidden")) {
+        scrollFormulaCardIntoView();
+        break;
+      }
       analyticFormulaVisible = true;
       analyticFormulaDismissed = false;
       renderAnalyticPanels(plan);
+      scrollFormulaCardIntoView();
       break;
+    case "show_hint":
+      await requestTutorHint(action);
+      break;
+    case "try_again":
+      focusComposerWithPlaceholder(action.payload?.gap || latestVerdictGap() || "Have another go");
+      break;
+    case "show_connection":
+      clearLessonAutoAdvanceTimer();
+      await requestConnectionBridge(plan);
+      break;
+    case "next_stage":
     case "reveal-next-step":
+      renderMessageActions(latestTutorActionMessage, {
+        ...latestTutorActionState,
+        actions: [],
+      });
       advanceLessonStage();
       break;
+    case "view_solution":
+      if (tutorState.hint_state?.escalate_next !== true) {
+        break;
+      }
+      await revealWorkedSolution(plan);
+      break;
     case "reveal-full-solution":
-      revealWorkedSolution(plan);
+      await revealWorkedSolution(plan);
+      break;
+    case "ask_followup":
+      focusComposerWithPlaceholder("What would you like to explore?");
+      break;
+    case "try_similar":
+      await loadSimilarProblem(plan);
       break;
     case "reset-view":
       applyAnalyticSceneState({ forceCamera: true });
@@ -2836,12 +3015,15 @@ function bindEvents() {
   newQuestionBtn?.addEventListener("click", () => {
     tutorState.reset();
     void resetVoiceSessionState();
+    clearLessonAutoAdvanceTimer();
     analyticFormulaVisible = false;
     analyticFullSolutionVisible = false;
     analyticFormulaDismissed = false;
     lastAppliedAnalyticStageId = null;
     similarQuestionRequest = null;
-    lastCompletionPromptKey = null;
+    currentSolutionSections = [];
+    latestTutorActionMessage = null;
+    latestTutorActionState = { actions: [], stageType: "orient", lastVerdict: null };
     analyticOverlayManager?.clear();
     sceneApi?.clearScene?.();
     sceneApi?.clearFocus?.();
@@ -2909,9 +3091,9 @@ function bindEvents() {
       return;
     }
     handleTutorAction({
-      id: "formula-reveal-solution",
-      label: "Reveal Full Solution",
-      kind: "reveal-full-solution",
+      id: "view_solution",
+      label: "Show me the solution",
+      kind: "view_solution",
     });
   });
   formulaCardCloseBtn?.addEventListener("click", () => {

@@ -125,6 +125,15 @@ function buildLineMaterial(color, opacity = 0.82) {
   }), opacity, true);
 }
 
+function buildPointMarkerMaterial(color, opacity = 1) {
+  const tone = new THREE.Color(color);
+  return applyMaterialOpacity(new THREE.MeshBasicMaterial({
+    color: tone,
+    transparent: true,
+    toneMapped: false,
+  }), opacity, true);
+}
+
 function lineRadius(thickness = 0.08) {
   return Math.max(0.012, Number(thickness || 0.08) * 0.22);
 }
@@ -208,7 +217,7 @@ function createMeshForShape(world, spec) {
     case "plane":
       return new THREE.Mesh(new THREE.PlaneGeometry(spec.params.width, spec.params.depth), buildMaterial(spec.color, opacity));
     case "pointMarker":
-      return new THREE.Mesh(new THREE.SphereGeometry(spec.params.radius, 16, 12), buildMaterial(spec.color, opacity));
+      return new THREE.Mesh(new THREE.SphereGeometry(spec.params.radius, 16, 12), buildPointMarkerMaterial(spec.color, opacity));
     case "line":
       return buildLineMesh(world, spec.params, spec.color);
     default:
@@ -268,6 +277,11 @@ export function applySceneObjectToMesh(world, mesh, objectSpec) {
   applyMaterialOpacity(mesh.material, mesh.userData.baseOpacity);
   if (spec.shape === "line") {
     applyLineMaterialStyle(mesh, mesh.userData.baseOpacity, spec.color);
+  } else if (spec.shape === "pointMarker") {
+    mesh.material.depthTest = false;
+    mesh.material.depthWrite = false;
+    mesh.renderOrder = 12;
+    mesh.frustumCulled = false;
   } else {
     mesh.material.depthTest = true;
     mesh.renderOrder = 0;

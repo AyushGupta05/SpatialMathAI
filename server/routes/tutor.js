@@ -9,6 +9,7 @@ import { converseStreamWithModelFailover } from "../services/modelInvoker.js";
 import { buildTutorResponseMeta } from "../services/tutorMetadata.js";
 import { generateSimilarTutorQuestions } from "../services/tutorSimilar.js";
 import { evaluateConcept, isTrivialInteraction } from "../services/conceptEvaluator.js";
+import { currentVerdictEntry } from "../../src/core/tutorActions.js";
 
 const LEARNING_STAGE_SEQUENCE = ["orient", "build", "predict", "check", "reflect", "challenge"];
 
@@ -82,6 +83,144 @@ export function createTutorRoute({
 } = {}) {
   const tutorRoute = new Hono();
 
+  function hintInstructionForType(hintType = "nudge", gap = "") {
+    switch (hintType) {
+      case "focus":
+        return "The learner wants to know what to focus on in the current scene. Describe ONE specific thing visible in the 3D scene that is most relevant to the stage goal. Do not mention the formula. Max 2 sentences.";
+      case "entry":
+        return "The learner does not know how to start. Give them the first step only - not the full approach. Frame it as a question they can answer by looking at the scene. Max 2 sentences.";
+      case "nudge":
+        return "The learner is stuck. Give a single targeted observation that redirects their attention without revealing the answer. Reference something specific in the current scene. End with a question. Max 2 sentences.";
+      case "deeper":
+        return "The learner has already had one hint and is still stuck. Give a more direct scaffold - break the problem into a simpler sub-question. Still do not give the answer. End with a question. Max 2 sentences.";
+      case "gap":
+        return `The learner partially understands but missed: ${gap || "an important missing step"}. Acknowledge what they got right in one clause. Then redirect specifically to ${gap || "that gap"} using a question about what they see in the scene. Max 2 sentences.`;
+      case "walkthrough":
+        return "Walk the learner through the first step of the analytic approach. Name the method. Give step 1 only. End by asking them to try step 2. Max 3 sentences.";
+      case "build_next":
+        return "Tell the learner which object or element should be placed next in the scene and why it matters for the problem. Do not place it for them. Max 2 sentences.";
+      case "reflect":
+        return "Help the learner connect what they just calculated to what they can see in the scene. Ask them to describe in their own words what the result means visually. Max 2 sentences.";
+      default:
+        return "Give one concise hint that points to the most relevant visible clue in the scene. End with a question. Max 2 sentences.";
+    }
+  }
+
+  async function streamSpecialTutorReply(c, requestPayload, {
+    instruction = "",
+    responseKind = "non_evaluated",
+    maxTokens = 300,
+    temperature = 0.3,
+  } = {}) {
+    const {
+      plan,
+      sceneSnapshot,
+      sceneContext = null,
+      learningState = {},
+      userMessage,
+      contextStepId = null,
+      hint_state = null,
+    } = requestPayload;
+    const effectiveLearningState = {
+      ...learningState,
+      hint_state: hint_state || learningState?.hint_state || null,
+    };
+    const effectiveSceneContext = {
+      ...(sceneContext || {}),
+      hint_state: effectiveLearningState.hint_state || null,
+    };
+    const modelUserMessage = userMessage === "__hint_request__"
+      ? "Please give me a hint for this stage."
+      : userMessage === "__connection_request__"
+        ? "How does this connect to the next idea?"
+        : userMessage;
+    const assessment = evaluateBuild(plan, sceneSnapshot, contextStepId);
+    const currentVerdict = currentVerdictEntry(effectiveLearningState);
+    const responseMeta = buildTutorResponseMeta({
+      plan,
+      learningState: effectiveLearningState,
+      contextStepId,
+      assessment,
+      completionState: { complete: false, reason: null },
+      userMessage,
+      conceptVerdict: currentVerdict,
+      responseKind,
+    });
+    const systemPrompt = `${buildTutorSystemPrompt({
+      plan,
+      sceneSnapshot,
+      sceneContext: effectiveSceneContext,
+      learningState: effectiveLearningState,
+      contextStepId,
+      assessment,
+      conceptVerdict: currentVerdict,
+    })}
+
+Additional instruction for this turn:
+${instruction}`.trim();
+    const history = Array.isArray(effectiveLearningState.history) ? effectiveLearningState.history : [];
+    const messages = [];
+    for (const message of history.slice(-8)) {
+      const role = message.role === "tutor" ? "assistant" : message.role;
+      if (!["user", "assistant"].includes(role)) continue;
+      if (messages.length && messages[messages.length - 1].role === role) continue;
+      messages.push({ role, content: [{ text: String(message.content || "") }] });
+    }
+    while (messages.length && messages[0].role !== "user") {
+      messages.shift();
+    }
+    if (!messages.length || messages[messages.length - 1].role !== "user") {
+      messages.push({ role: "user", content: [{ text: modelUserMessage }] });
+    } else {
+      messages[messages.length - 1] = { role: "user", content: [{ text: modelUserMessage }] };
+    }
+
+    return streamSSE(c, async (stream) => {
+      try {
+        await stream.writeSSE({ data: JSON.stringify({ type: "meta", content: responseMeta }) });
+        for await (const chunk of streamModel("text", systemPrompt, messages, {
+          maxTokens,
+          temperature,
+        })) {
+          await stream.writeSSE({ data: JSON.stringify({ type: "text", content: chunk }) });
+        }
+        await stream.writeSSE({ data: JSON.stringify({ type: "assessment", content: assessment }) });
+        await stream.writeSSE({ data: JSON.stringify({ type: "done" }) });
+      } catch (error) {
+        console.error("Tutor special stream error:", error);
+        const fallbackText = buildFallbackTutorReply({
+          plan,
+          assessment,
+          sceneContext: effectiveSceneContext,
+          userMessage,
+          contextStepId,
+        });
+        await stream.writeSSE({ data: JSON.stringify({ type: "meta", content: responseMeta }) });
+        await stream.writeSSE({ data: JSON.stringify({ type: "text", content: typeof fallbackText === "string" ? fallbackText : "Take another look at the scene." }) });
+        await stream.writeSSE({ data: JSON.stringify({ type: "assessment", content: assessment }) });
+        await stream.writeSSE({ data: JSON.stringify({ type: "done", fallback: true }) });
+      }
+    });
+  }
+
+  async function handleHintRequest(c, requestPayload) {
+    return streamSpecialTutorReply(c, requestPayload, {
+      instruction: hintInstructionForType(requestPayload?.hint_type, requestPayload?.gap || ""),
+      responseKind: "verdict",
+      maxTokens: 300,
+      temperature: 0.25,
+    });
+  }
+
+  async function handleConnectionRequest(c, requestPayload) {
+    return streamSpecialTutorReply(c, requestPayload, {
+      instruction: "In 1-2 sentences, explain how the concept just demonstrated (from the completed stage) connects to what comes next in the lesson. Be concrete - reference the specific objects or measurements visible in the scene. Do not repeat what was just learned. End with a forward-looking statement.",
+      responseKind: "connection_followup",
+      maxTokens: 300,
+      temperature: 0.2,
+    });
+  }
+
   async function streamGuidedTutorReply(c, requestPayload, { skipEvaluation = false } = {}) {
     const {
       plan,
@@ -145,6 +284,14 @@ export function createTutorRoute({
     const nextStage = nextStageForReply(plan, effectiveLearningState, contextStepId, assessment, conceptVerdict);
     const nextLearningStageKey = nextLearningStage(effectiveLearningState?.learningStage || "orient", conceptVerdict, assessment);
 
+    const responseKind = revealSolution
+      ? "solution_shown"
+      : conceptVerdict?.verdict
+        ? "verdict"
+        : skipEvaluation || requestPayload?.requires_evaluation === false
+          ? "non_evaluated"
+          : "stage_opening";
+    const solutionReveal = revealSolution ? buildFullSolutionReveal(plan, effectiveSceneContext) : null;
     const responseMeta = buildTutorResponseMeta({
       plan,
       learningState: effectiveLearningState,
@@ -153,6 +300,13 @@ export function createTutorRoute({
       completionState,
       userMessage,
       conceptVerdict,
+      responseKind,
+      solutionReveal: solutionReveal
+        ? {
+          isSolutionReveal: true,
+          sections: solutionReveal.sections,
+        }
+        : null,
     });
     if (nextStage?.id) {
       responseMeta.stageStatus = {
@@ -174,12 +328,6 @@ export function createTutorRoute({
       nextStage: stagePayload(nextStage),
       nextLearningStage: nextLearningStageKey,
     };
-    const deterministicRevealText = revealSolution ? buildSolutionRevealText(plan) : "";
-    const escalatedRevealText = !revealSolution
-      && conceptVerdict?.verdict === "STUCK"
-      && effectiveLearningState?.hint_state?.escalate_next === true
-      ? buildFullSolutionReveal(plan, effectiveSceneContext)
-      : "";
     const systemPrompt = buildTutorSystemPrompt({
       plan,
       sceneSnapshot,
@@ -210,13 +358,11 @@ export function createTutorRoute({
     return streamSSE(c, async (stream) => {
       try {
         await stream.writeSSE({ data: JSON.stringify({ type: "meta", content: { ...responseMeta, conceptVerdict } }) });
-        if (revealSolution || escalatedRevealText) {
+        if (revealSolution && solutionReveal) {
           await stream.writeSSE({
             data: JSON.stringify({
               type: "text",
-              content: revealSolution
-                ? deterministicRevealText || "Here is the worked solution."
-                : escalatedRevealText,
+              content: solutionReveal.transcriptText || buildSolutionRevealText(plan) || "Here is the worked solution.",
             }),
           });
           await stream.writeSSE({ data: JSON.stringify({ type: "assessment", content: assessmentPayload }) });
@@ -233,7 +379,9 @@ export function createTutorRoute({
         await stream.writeSSE({ data: JSON.stringify({ type: "done" }) });
       } catch (error) {
         console.error("Tutor stream error:", error);
-        const fallbackText = escalatedRevealText || buildFallbackTutorReply({
+        const fallbackText = revealSolution && solutionReveal
+          ? solutionReveal.transcriptText
+          : buildFallbackTutorReply({
           plan,
           assessment,
           sceneContext: effectiveSceneContext,
@@ -264,10 +412,42 @@ export function createTutorRoute({
         requires_evaluation = true,
         input_source = "text",
         hint_state = null,
+        hint_type = null,
+        gap = null,
+        hint_level = null,
       } = await c.req.json();
 
       if (!sceneSnapshot || !userMessage || typeof userMessage !== "string") {
         return c.json({ error: "sceneSnapshot and userMessage are required" }, 400);
+      }
+
+      if (userMessage === "__hint_request__") {
+        return handleHintRequest(c, {
+          plan,
+          sceneSnapshot,
+          sceneContext,
+          learningState,
+          userMessage,
+          contextStepId,
+          input_source,
+          hint_state,
+          hint_type,
+          gap,
+          hint_level,
+        });
+      }
+
+      if (userMessage === "__connection_request__") {
+        return handleConnectionRequest(c, {
+          plan,
+          sceneSnapshot,
+          sceneContext,
+          learningState,
+          userMessage,
+          contextStepId,
+          input_source,
+          hint_state,
+        });
       }
 
       if (!plan) {

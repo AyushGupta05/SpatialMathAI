@@ -913,6 +913,7 @@ export function normalizeScenePlan(plan = {}) {
       mode: normalizeString(plan.problem?.mode || plan.mode, "guided"),
     },
     experienceMode,
+    autoAdvance: plan.autoAdvance !== false,
     representationMode,
     overview,
     sourceSummary,

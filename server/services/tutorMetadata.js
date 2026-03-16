@@ -1,5 +1,6 @@
 import { normalizeScenePlan } from "../../src/ai/planSchema.js";
 import { supports2dCompanionShape } from "../../src/ai/representationMode.js";
+import { applyVerdictToLearningState, resolveTutorActionState } from "../../src/core/tutorActions.js";
 
 function suggestionById(plan, suggestionId) {
   return plan.objectSuggestions.find((suggestion) => suggestion.id === suggestionId) || null;
@@ -64,75 +65,6 @@ function representationDirectiveForReply(plan, assessment = null, userMessage = 
   };
 }
 
-function stageActionsForReply(plan, stage, learningState = {}, assessment = null) {
-  if (!stage) return [];
-  if (plan.experienceMode === "analytic_auto") {
-    const sceneMoment = sceneMomentForStage(plan, stage.id, learningState);
-    const sceneIndex = Math.max(0, plan.sceneMoments.findIndex((moment) => moment.id === sceneMoment?.id));
-    const includeNext = sceneIndex < Math.max(plan.sceneMoments.length - 1, 0);
-    const actions = [
-      !sceneMoment?.revealFormula
-        ? {
-          id: `${stage.id}-formula`,
-          label: "Show Formula",
-          kind: "show-formula",
-          payload: { stageId: stage.id },
-        }
-        : null,
-      includeNext
-        ? {
-          id: `${stage.id}-next`,
-          label: "What's next?",
-          kind: "reveal-next-step",
-          payload: { stageId: stage.id },
-        }
-        : null,
-      {
-        id: `${stage.id}-solution`,
-        label: "View Solution",
-        kind: "reveal-full-solution",
-        payload: { stageId: stage.id },
-      },
-    ].filter(Boolean);
-    return actions;
-  }
-
-  const nextRequiredId = assessment?.guidance?.nextRequiredSuggestionIds?.[0] || null;
-  const nextRequiredSuggestion = nextRequiredId ? suggestionById(plan, nextRequiredId) : null;
-  const actions = [];
-
-  if (nextRequiredSuggestion) {
-    actions.push({
-      id: `${stage.id}-preview`,
-      label: `Preview ${nextRequiredSuggestion.title}`,
-      kind: "preview-required-object",
-      payload: {
-        stageId: stage.id,
-        suggestionId: nextRequiredSuggestion.id,
-        objectSpec: nextRequiredSuggestion.object,
-        highlightTargets: [nextRequiredSuggestion.object.id],
-      },
-    });
-  }
-
-  actions.push(
-    {
-      id: `${stage.id}-explain`,
-      label: (learningState?.learningStage || "orient") === "orient" ? "Give me a hint" : "I'm stuck",
-      kind: "explain-stage",
-      payload: { stageId: stage.id },
-    },
-    {
-      id: `${stage.id}-continue`,
-      label: "I think I see it",
-      kind: "continue-stage",
-      payload: { stageId: stage.id },
-    },
-  );
-
-  return actions.slice(0, 3);
-}
-
 function systemContextMessage(plan) {
   const evidence = plan.sourceEvidence;
   const givens = evidence?.givens?.length ? `Givens: ${evidence.givens.join(", ")}.` : "";
@@ -161,6 +93,8 @@ export function buildTutorResponseMeta({
   completionState = null,
   userMessage = "",
   conceptVerdict = null,
+  responseKind = "stage_opening",
+  solutionReveal = null,
 }) {
   const plan = normalizeScenePlan(planInput);
   const revealSolution = completionState?.reason === "revealed-solution";
@@ -186,19 +120,24 @@ export function buildTutorResponseMeta({
     ? [...new Set([...focusTargets, ...cueFocusTargets])]
     : focusTargets;
 
-  const actions = completionState?.complete ? [] : stageActionsForReply(plan, stage, learningState, assessment);
-  if (
-    conceptVerdict?.verdict === "STUCK"
-    && (learningState?.hint_state?.current_stage_hints || 0) >= 2
-    && !actions.some((a) => a.kind === "reveal-full-solution")
-  ) {
-    actions.push({
-      id: `${stage?.id || "stuck"}-solution`,
-      label: "View Solution",
-      kind: "reveal-full-solution",
-      payload: { stageId: stage?.id || null },
-    });
-  }
+  const learningStateForActions = conceptVerdict?.verdict
+    ? applyVerdictToLearningState(learningState, conceptVerdict)
+    : learningState;
+  const actionState = resolveTutorActionState({
+    plan,
+    stage,
+    learningState: learningStateForActions,
+    conceptVerdict,
+    completionState,
+    responseKind,
+  });
+  const actions = actionState.actions.map((action) => ({
+    ...action,
+    payload: {
+      ...(action.payload || {}),
+      stageId: stage?.id || null,
+    },
+  }));
 
   return {
     actions,
@@ -227,9 +166,14 @@ export function buildTutorResponseMeta({
         : Boolean(assessment?.activeStep?.complete || assessment?.guidance?.readyForPrediction),
     },
     systemContextMessage: systemContextMessage(plan),
+    actionState: {
+      stageType: actionState.stageType,
+      lastVerdict: actionState.lastVerdict,
+    },
     completionState: completionState?.complete
       ? { complete: true, reason: completionState.reason || "correct-answer" }
       : { complete: false, reason: null },
+    solutionReveal,
     sceneDirective: {
       ...representation,
       stageId: sceneMoment?.id || stage?.id || null,

@@ -141,6 +141,9 @@ export class TutorState extends EventTarget {
 
   setLearningStage(stage) {
     if (!LEARNING_STAGES.includes(stage)) return;
+    if (this._state.learningStage !== stage) {
+      this._resetStageHintState();
+    }
     this._state.learningStage = stage;
     this._emit("learning-stage", { learningStage: stage });
   }
@@ -199,6 +202,7 @@ export class TutorState extends EventTarget {
   nextStep() {
     if (this._state.currentStep < this.totalSteps - 1) {
       this._state.currentStep += 1;
+      this._resetStageHintState();
       this._emit("step", { step: this._state.currentStep });
       return true;
     }
@@ -208,6 +212,7 @@ export class TutorState extends EventTarget {
   prevStep() {
     if (this._state.currentStep > 0) {
       this._state.currentStep -= 1;
+      this._resetStageHintState();
       this._emit("step", { step: this._state.currentStep });
       return true;
     }
@@ -216,6 +221,9 @@ export class TutorState extends EventTarget {
 
   goToStep(index) {
     if (index >= 0 && index < this.totalSteps) {
+      if (this._state.currentStep !== index) {
+        this._resetStageHintState();
+      }
       this._state.currentStep = index;
       this._emit("step", { step: this._state.currentStep });
       return true;
@@ -256,6 +264,18 @@ export class TutorState extends EventTarget {
       this._state.hint_state.escalate_next = false;
     }
     this._emit("verdict", { verdict: entry, hint_state: { ...this._state.hint_state } });
+    return entry;
+  }
+
+  addLearnerEvent(event = {}) {
+    const entry = {
+      stage: event.stage || this._state.currentStep,
+      event: event.event || "interaction",
+      hint_count: Number.isFinite(Number(event.hint_count)) ? Number(event.hint_count) : this._state.hint_state.current_stage_hints,
+      timestamp: Date.now(),
+    };
+    this._state.learnerHistory.push(entry);
+    this._emit("learner-event", { entry });
     return entry;
   }
 
@@ -328,6 +348,11 @@ export class TutorState extends EventTarget {
   _emit(type, detail) {
     this.dispatchEvent(new CustomEvent(type, { detail }));
     this.dispatchEvent(new CustomEvent("change", { detail: { type, ...detail } }));
+  }
+
+  _resetStageHintState() {
+    this._state.hint_state.current_stage_hints = 0;
+    this._state.hint_state.escalate_next = false;
   }
 }
 

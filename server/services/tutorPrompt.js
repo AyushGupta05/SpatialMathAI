@@ -416,11 +416,14 @@ export function buildFullSolutionReveal(plan, _sceneContext = null) {
   const sections = buildFullSolutionSections(normalizedPlan);
   const serializedSections = serializeFullSolutionSections(sections);
   const intro = `Let's work through the full solution for ${normalizedPlan.sourceSummary.cleanedQuestion || normalizedPlan.problem.question}.`;
-  return [
+  return {
     intro,
-    serializedSections || fullSolutionLines(normalizedPlan).join("\n\n"),
-    "Walk me through it in your own words.",
-  ].filter(Boolean).join("\n\n");
+    sections,
+    transcriptText: [
+      intro,
+      serializedSections || fullSolutionLines(normalizedPlan).join("\n\n"),
+    ].filter(Boolean).join("\n\n"),
+  };
 }
 
 function buildVerdictInstructions(verdict, learningState = {}) {
@@ -463,9 +466,12 @@ Response rules for this turn:
         return `
 
 === EVALUATION RESULT: STUCK ===
-Escalation triggered: reveal the full worked solution now.
-- Give the worked solution clearly and directly.
-- End with exactly: "Walk me through it in your own words."`;
+The learner has exhausted the hint path.
+Response rules for this turn:
+- Acknowledge that they have pushed this stage far enough for now.
+- Invite them to tap "Show me the solution" if they want the full worked solution.
+- Do NOT reveal the worked solution yet.
+- Keep it to 2 sentences max.`;
       }
       return `
 
@@ -588,9 +594,6 @@ Conversation rules:
 
 export function buildFallbackTutorReply({ plan, assessment, sceneContext, userMessage, contextStepId }) {
   const normalizedPlan = normalizeScenePlan(plan);
-  if (sceneContext?.hint_state?.escalate_next === true) {
-    return buildFullSolutionReveal(normalizedPlan, sceneContext);
-  }
   const assessmentStepId = assessment?.summary?.currentStepId || null;
   const currentStep = normalizedPlan.buildSteps.find((step) => step.id === contextStepId)
     || normalizedPlan.buildSteps.find((step) => step.id === assessmentStepId)

@@ -54,17 +54,31 @@ function renderMathHtml(expression = "", { displayMode = false } = {}) {
   try {
     return katex.renderToString(source, {
       displayMode,
-      throwOnError: true,
+      throwOnError: false,
       strict: "ignore",
-      output: "htmlAndMathml",
+      output: "html",
     });
   } catch {
     return `<code>${escapeHtml(String(expression || "").trim())}</code>`;
   }
 }
 
-function formatInlineText(text = "") {
-  return escapeHtml(text).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+function extractMathPlaceholders(text = "") {
+  const tokens = [];
+  const placeholderText = String(text || "").replace(MATH_TOKEN_PATTERN, (token) => {
+    const index = tokens.push(token) - 1;
+    return `@@MATH_${index}@@`;
+  });
+  return {
+    placeholderText,
+    tokens,
+  };
+}
+
+function applyInlineMarkdown(text = "") {
+  return escapeHtml(text)
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[^\\])_([^_]+)_/g, "$1<em>$2</em>");
 }
 
 function tokenToMath(token = "") {
@@ -83,27 +97,18 @@ function tokenToMath(token = "") {
   return { displayMode: false, body: token };
 }
 
-function renderInlineMixedHtml(text = "") {
-  const source = String(text || "");
-  let lastIndex = 0;
-  let output = "";
-
-  for (const match of source.matchAll(MATH_TOKEN_PATTERN)) {
-    const token = match[0];
-    const index = match.index ?? 0;
-    if (index > lastIndex) {
-      output += formatInlineText(source.slice(lastIndex, index));
-    }
+function restoreMathPlaceholders(text = "", tokens = []) {
+  return String(text || "").replace(/@@MATH_(\d+)@@/g, (_match, indexText) => {
+    const token = tokens[Number(indexText)] || "";
     const math = tokenToMath(token);
-    output += renderMathHtml(math.body, { displayMode: math.displayMode });
-    lastIndex = index + token.length;
-  }
+    return renderMathHtml(math.body, { displayMode: math.displayMode });
+  });
+}
 
-  if (lastIndex < source.length) {
-    output += formatInlineText(source.slice(lastIndex));
-  }
-
-  return output || formatInlineText(source);
+function renderInlineMixedHtml(text = "") {
+  const { placeholderText, tokens } = extractMathPlaceholders(text);
+  const markdownHtml = applyInlineMarkdown(placeholderText);
+  return restoreMathPlaceholders(markdownHtml, tokens);
 }
 
 function isStandaloneMathLine(line = "") {
@@ -147,7 +152,7 @@ export function renderRichTextHtml(content = "") {
       continue;
     }
 
-    const bulletMatch = line.match(/^[-*]\s+(.+)$/);
+    const bulletMatch = line.match(/^(?:[-*]|•)\s+(.+)$/);
     if (bulletMatch) {
       listItems.push(`<li>${renderInlineMixedHtml(bulletMatch[1])}</li>`);
       continue;

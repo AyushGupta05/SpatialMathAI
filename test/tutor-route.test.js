@@ -167,8 +167,8 @@ test("POST /api/tutor streams lesson metadata before tutor text", async () => {
   assert.ok(meta);
   assert.equal(meta.stageStatus.currentStageId, "step-1");
   assert.equal(meta.stageStatus.canAdvance, false);
-  assert.ok(meta.actions.some((action) => action.kind === "explain-stage"));
-  assert.ok(meta.actions.some((action) => action.kind === "continue-stage"));
+  assert.deepEqual(meta.actions.map((action) => action.id), ["show_hint"]);
+  assert.equal(meta.actions[0].label, "What should I focus on?");
   assert.deepEqual(meta.focusTargets, ["primary-cylinder"]);
   assert.match(meta.systemContextMessage, /Givens: radius = 3, height = 7\./);
   assert.equal(text, "Let's start.");
@@ -234,8 +234,7 @@ test("POST /api/tutor includes scene directives for analytic lessons", async () 
   assert.equal(meta.sceneDirective.stageId, "observe");
   assert.equal(meta.sceneDirective.cameraBookmarkId, "overview");
   assert.deepEqual(meta.sceneDirective.visibleOverlayIds, ["analytic-axes"]);
-  assert.ok(meta.actions.some((action) => action.kind === "show-formula"));
-  assert.ok(meta.actions.some((action) => action.kind === "reveal-full-solution"));
+  assert.deepEqual(meta.actions.map((action) => action.id), ["show_hint", "show_formula"]);
 });
 
 test("POST /api/tutor reveals the worked solution deterministically when asked directly", async () => {
@@ -265,6 +264,8 @@ test("POST /api/tutor reveals the worked solution deterministically when asked d
   assert.deepEqual(meta?.completionState, { complete: true, reason: "revealed-solution" });
   assert.equal(meta?.sceneDirective?.revealFullSolution, true);
   assert.equal(meta?.sceneDirective?.revealFormula, true);
+  assert.equal(meta?.solutionReveal?.isSolutionReveal, true);
+  assert.ok(Array.isArray(meta?.solutionReveal?.sections));
   assert.match(text, /Final answer/i);
   assert.match(text, /\(1, -2, 3\)/);
 });

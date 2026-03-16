@@ -6,7 +6,7 @@ import { buildFallbackFreeformTurn, generateFreeformTutorTurn } from "./freeform
 import { converseWithModelFailover } from "./modelInvoker.js";
 import { evaluateTutorCompletion } from "./tutorCompletion.js";
 import { buildTutorResponseMeta } from "./tutorMetadata.js";
-import { buildTutorSystemPrompt, buildFallbackTutorReply, buildFullSolutionReveal } from "./tutorPrompt.js";
+import { buildTutorSystemPrompt, buildFallbackTutorReply } from "./tutorPrompt.js";
 import {
   buildNarrationPrompt,
   buildVoiceCoachPrompt,
@@ -270,11 +270,6 @@ async function generateGuidedVoiceReply({
     assistantText = condenseForSpeech(
       buildSolutionRevealText(plan) || "I've opened the full solution. Follow the highlighted scene as you work through it."
     );
-  } else if (conceptVerdict?.verdict === "STUCK" && learningState?.hint_state?.escalate_next === true) {
-    assistantText = condenseForSpeech(buildFullSolutionReveal(plan, {
-      ...(sceneContext || {}),
-      hint_state: learningState?.hint_state || null,
-    }));
   } else {
     try {
       assistantText = await converseWithModelFailover(

@@ -215,27 +215,27 @@ export class AnalyticOverlayManager {
       const line = new THREE.Line(geometry, material);
       group.add(line);
 
-      const axisLabel = cssLabel(axis.key.toUpperCase(), "annotation");
-      axisLabel.position.copy(to.clone().add(new THREE.Vector3(0.15, 0.15, 0.15)));
+      const axisLabel = cssLabel(axis.key.toUpperCase(), "annotation", ["axis"]);
+      axisLabel.position.copy(to.clone().add(new THREE.Vector3(0.26, 0.2, 0.22)));
       group.add(axisLabel);
     }
 
     for (let x = bounds.x[0]; x <= bounds.x[1]; x += tickStep) {
       if (x === 0) continue;
-      const label = cssLabel(String(x), "annotation");
-      label.position.set(x, 0.15, 0);
+      const label = cssLabel(String(x), "annotation", ["tick", "axis"]);
+      label.position.set(x, 0.12, 0.26);
       group.add(label);
     }
     for (let y = bounds.y[0]; y <= bounds.y[1]; y += tickStep) {
       if (y === 0) continue;
-      const label = cssLabel(String(y), "annotation");
-      label.position.set(0.15, y, 0);
+      const label = cssLabel(String(y), "annotation", ["tick", "axis"]);
+      label.position.set(0.34, y, 0.24);
       group.add(label);
     }
     for (let z = bounds.z[0]; z <= bounds.z[1]; z += tickStep) {
       if (z === 0) continue;
-      const label = cssLabel(String(z), "annotation");
-      label.position.set(0, 0.15, z);
+      const label = cssLabel(String(z), "annotation", ["tick", "axis"]);
+      label.position.set(0.24, 0.12, z);
       group.add(label);
     }
 

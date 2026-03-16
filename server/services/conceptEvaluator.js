@@ -43,9 +43,10 @@ export function isTrivialInteraction(learningStage, userMessage) {
 function summarizeLearnerHistory(history = []) {
   if (!history.length) return "None";
   return history
+    .filter((entry) => entry?.verdict)
     .slice(-4)
     .map((entry) => `Stage ${entry.stage}: verdict=${entry.verdict}${entry.gap ? `, gap="${entry.gap}"` : ""}`)
-    .join("; ");
+    .join("; ") || "None";
 }
 
 function buildEvaluationMessage({ stageGoal, learnerInput, prediction, learnerHistory }) {

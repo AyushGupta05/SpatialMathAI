@@ -310,6 +310,14 @@ export function createWorld(container) {
     const bbox = new THREE.Box3().setFromObject(mesh);
     const halfHeight = (bbox.max.y - bbox.min.y) / 2;
     mesh.position.y = type === "plane" ? 0 : halfHeight;
+    if (type === "pointMarker") {
+      mesh.material.transparent = true;
+      mesh.material.opacity = 1;
+      mesh.material.depthTest = false;
+      mesh.material.depthWrite = false;
+      mesh.renderOrder = 11;
+      mesh.frustumCulled = false;
+    }
     if (type === "plane") {
       mesh.rotation.x = -Math.PI / 2;
     }
