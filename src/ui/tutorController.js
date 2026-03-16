@@ -27,6 +27,7 @@ import {
   resolveTutorActionState,
 } from "../core/tutorActions.js";
 import { mergeRequiredSceneObjects, shouldSyncAnalyticScene } from "./sceneDirectiveSync.js";
+import { resolveDeferredStageAdvance } from "./deferredStageProgression.js";
 import { initUnfoldDrawer, setUnfoldRepresentationMode, syncUnfoldDrawer } from "./unfoldDrawer.js";
 import { hasMathMarkup, renderMathBlockHtml, renderRichTextHtml } from "./mathMarkup.js";
 import { MicrophoneCapture } from "./microphoneCapture.js";
@@ -76,6 +77,7 @@ let analyticFullSolutionVisible = false;
 let analyticFormulaDismissed = false;
 let lastAppliedAnalyticStageId = null;
 let lastAppliedAnalyticCameraBookmarkId = null;
+let deferredStageAdvance = null;
 let similarQuestionRequest = null;
 let stageWrapEl = null;
 let currentRepresentationMode = "3d";
@@ -867,6 +869,87 @@ function buildStageIntroMessage(plan = activePlan(), assessment = tutorState.lat
   }
 
   return "The scene is yours to explore. What are you curious about?";
+}
+
+function stagePayloadForClient(stage = null) {
+  if (!stage) return null;
+  return {
+    ...stage,
+    checkpoint: stage.checkpoint || (stage.checkpointPrompt ? { prompt: stage.checkpointPrompt } : null),
+  };
+}
+
+function applyDeferredStageAdvanceOverride(response = {}, plan = activePlan(), { consumedLearnerInput = false } = {}) {
+  if (!plan || !isAnalyticPlan(plan)) {
+    deferredStageAdvance = null;
+    return response;
+  }
+
+  const currentStageId = response?.stageStatus?.currentStageId
+    || response?.assessment?.nextStage?.id
+    || tutorState.getCurrentStep()?.id
+    || "";
+  const stageProgress = response?.assessment?.stageProgress || response?.stageProgress || {};
+  const decision = resolveDeferredStageAdvance({
+    pendingAdvance: deferredStageAdvance,
+    plan,
+    currentStageId,
+    backendSaidNo: stageProgress.layer2Decision === "NO" && stageProgress.shouldProgress === false,
+    backendProgressed: Boolean(stageProgress.shouldProgress),
+    consumedLearnerInput,
+    randomFn: Math.random,
+  });
+  deferredStageAdvance = decision.pendingAdvance;
+
+  if (!decision.overrideStageId) {
+    return response;
+  }
+
+  const targetStage = plan.lessonStages?.find((stage) => stage.id === decision.overrideStageId) || null;
+  if (!targetStage) {
+    return response;
+  }
+
+  const targetMoment = plan.sceneMoments?.find((moment) => moment.id === decision.overrideStageId) || null;
+  const nextLearningStage = response.nextLearningStage || response.assessment?.nextLearningStage || tutorState.learningStage;
+  response.stageStatus = {
+    ...(response.stageStatus || {}),
+    currentStageId: targetStage.id,
+  };
+  if (response.assessment) {
+    response.assessment = {
+      ...response.assessment,
+      nextStage: stagePayloadForClient(targetStage),
+      nextLearningStage,
+      stageProgress: {
+        ...(response.assessment.stageProgress || {}),
+        shouldProgress: true,
+        reason: response.assessment.stageProgress?.reason || "Deferred client-side advance after repeated blocked turns.",
+      },
+    };
+  }
+
+  if (targetMoment) {
+    const focusTargets = targetMoment.focusTargets?.length
+      ? targetMoment.focusTargets
+      : response.focusTargets || response.sceneDirective?.focusTargets || [];
+    response.focusTargets = focusTargets;
+    response.sceneDirective = {
+      ...(response.sceneDirective || {}),
+      stageId: targetMoment.id,
+      cameraBookmarkId: targetMoment.cameraBookmarkId || response.sceneDirective?.cameraBookmarkId || null,
+      focusTargets,
+      visibleObjectIds: targetMoment.visibleObjectIds || [],
+      visibleOverlayIds: targetMoment.visibleOverlayIds || [],
+      revealFormula: Boolean(targetMoment.revealFormula),
+      revealFullSolution: Boolean(targetMoment.revealFullSolution),
+      representationMode: targetMoment.representationMode
+        || response.sceneDirective?.representationMode
+        || defaultRepresentationDirective(plan).representationMode,
+    };
+  }
+
+  return response;
 }
 
 function normalizedTranscriptSnippet(text = "") {
@@ -1824,6 +1907,7 @@ function setPlan(plan, options = {}) {
   analyticFormulaDismissed = false;
   lastAppliedAnalyticStageId = null;
   lastAppliedAnalyticCameraBookmarkId = null;
+  deferredStageAdvance = null;
   similarQuestionRequest = null;
   currentSolutionSections = [];
   latestTutorActionMessage = null;
@@ -2137,6 +2221,9 @@ function applyVoiceTurnResult(response = {}, plan = activePlan()) {
   }
 
   const verdictStage = tutorState.learningStage;
+  applyDeferredStageAdvanceOverride(response, plan, {
+    consumedLearnerInput: Boolean(inputTranscript),
+  });
   syncStepFromTutorResponse(response, plan);
   syncLearningStageFromTutorResponse(response, plan);
 
@@ -2262,6 +2349,11 @@ async function sendTutorMessage(messageText, options = {}) {
           }
           : null);
         const verdict = conceptVerdict?.verdict || pendingVerdict || null;
+        applyDeferredStageAdvanceOverride(response, plan, {
+          consumedLearnerInput: true,
+        });
+        pendingStage = response.assessment?.nextStage ?? pendingStage;
+        pendingLearningStage = response.assessment?.nextLearningStage ?? response.nextLearningStage ?? pendingLearningStage;
 
         typing?.classList.remove("loading-dots");
         if (typing) {
@@ -3134,6 +3226,7 @@ function bindEvents() {
     analyticFormulaDismissed = false;
     lastAppliedAnalyticStageId = null;
     lastAppliedAnalyticCameraBookmarkId = null;
+    deferredStageAdvance = null;
     similarQuestionRequest = null;
     currentSolutionSections = [];
     latestTutorActionMessage = null;
@@ -3375,4 +3468,3 @@ export function updateTutorLabels() {
   electricFieldManager?.update();
   syncUnfoldDrawer();
 }
-

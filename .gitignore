@@ -1,9 +1,11 @@
 .venv/
 .mplconfig/
+.pytest_cache/
 __pycache__/
 .cache/
 .keras/
 .local/
+.claude/
 models/tf_gesture/
 node_modules/
 .env.local
@@ -11,3 +13,5 @@ node_modules/
 output/
 docs/submission/
 .codex-runtime/
+output.txt
+test_output.txt
