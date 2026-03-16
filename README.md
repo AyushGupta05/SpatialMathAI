@@ -29,7 +29,7 @@ AWS_SECRET_ACCESS_KEY=your_secret
 AWS_SESSION_TOKEN=your_session_token
 ```
 
-The app still runs without Bedrock credentials, but multimodal planning, Sonic voice, and embedding-backed retrieval will fall back to the local non-AWS path.
+The app still runs without Bedrock credentials but alot of the core functionality will become unavailable
 
 ## Run
 
@@ -37,7 +37,7 @@ The app still runs without Bedrock credentials, but multimodal planning, Sonic v
 npm run dev
 ```
 
-Then open `http://localhost:3000/index.html`.
+Then open `http://localhost:3000`.
 
 ## Architecture
 
