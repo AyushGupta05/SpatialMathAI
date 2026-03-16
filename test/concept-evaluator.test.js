@@ -19,6 +19,8 @@ test("isTrivialInteraction returns false for substantive build messages", () => 
   assert.equal(isTrivialInteraction("build", "I think the area of each face is length times width"), false);
   assert.equal(isTrivialInteraction("build", "the formula uses $lw + lh + wh$"), false);
   assert.equal(isTrivialInteraction("build", "maybe around 42"), false);
+  assert.equal(isTrivialInteraction("build", "I get AB and AC"), false);
+  assert.equal(isTrivialInteraction("build", "AB = B - A and AC = C - A"), false);
 });
 
 test("isTrivialInteraction returns false for predict/check/reflect/challenge", () => {

@@ -1334,6 +1334,29 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 5px; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.stage-rail-next {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(72, 201, 255, 0.28);
+  background: rgba(72, 201, 255, 0.1);
+  color: #d9f7ff;
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
+}
+.stage-rail-next:hover {
+  background: rgba(72, 201, 255, 0.16);
+  border-color: rgba(72, 201, 255, 0.44);
+  transform: translateY(-1px);
+}
+.stage-rail-next:disabled {
+  opacity: 0.45;
+  cursor: default;
+  transform: none;
+}
 
 /* Formula card & solution drawer (non-intrusive) */
 .formula-card,

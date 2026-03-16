@@ -1,7 +1,9 @@
 import { converseWithModelFailover } from "./modelInvoker.js";
 import { cleanupJson } from "./plan/shared.js";
 
-const MATH_TOKEN_HINT = /[$\\]|[_^]|\d/;
+const MATH_TOKEN_HINT = /[$\\]|[_^]|\d|=|\(|\)|,/;
+const SPATIAL_REASONING_HINT = /\b(vector|vectors|line|lines|plane|planes|point|points|angle|angles|distance|projection|normal|midpoint|coordinate|coordinates|dot product|cross product)\b/i;
+const LABEL_SEQUENCE_HINT = /\b[A-Z]{1,3}\b(?:\s*(?:,|and|or)\s*\b[A-Z]{1,3}\b)+/;
 
 const EVALUATION_SYSTEM_PROMPT = `You are an evaluation engine for a spatial math tutor.
 Given a learner's response to a stage goal, classify it
@@ -31,8 +33,11 @@ export function isTrivialInteraction(learningStage, userMessage) {
 
   const text = String(userMessage || "").trim();
   if (learningStage === "build") {
+    if (MATH_TOKEN_HINT.test(text) || SPATIAL_REASONING_HINT.test(text) || LABEL_SEQUENCE_HINT.test(text)) {
+      return false;
+    }
     const wordCount = text.split(/\s+/).filter(Boolean).length;
-    if (wordCount < 10 && !MATH_TOKEN_HINT.test(text)) {
+    if (wordCount < 10) {
       return true;
     }
   }

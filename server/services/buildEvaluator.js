@@ -104,6 +104,12 @@ function suggestionById(plan, suggestionId) {
   return plan.objectSuggestions.find((suggestion) => suggestion.id === suggestionId) || null;
 }
 
+function suggestionIdsForAnalyticStep(step = {}, moment = null) {
+  const suggestedIds = Array.isArray(step?.suggestedObjectIds) ? step.suggestedObjectIds.filter(Boolean) : [];
+  if (suggestedIds.length) return suggestedIds;
+  return Array.isArray(moment?.visibleObjectIds) ? moment.visibleObjectIds.filter(Boolean) : [];
+}
+
 function defaultActiveStep(plan, stepAssessments) {
   if (!stepAssessments.length) return null;
   const firstIncomplete = stepAssessments.find((step) => !step.complete);
@@ -147,43 +153,101 @@ function analyticAssessment(plan, snapshot, currentStepId = null) {
   const activeMoment = sceneMoments.find((moment) => moment.id === (activeStep?.id || currentStepId))
     || sceneMoments[0]
     || null;
+  const activeIndex = Math.max(0, plan.buildSteps.findIndex((step) => step.id === activeStep?.id));
+  const usedIds = new Set();
+  const objectAssessments = plan.objectSuggestions.map((suggestion) => {
+    const match = findBestMatch(suggestion, snapshot.objects, usedIds);
+    return {
+      suggestionId: suggestion.id,
+      objectId: suggestion.object.id,
+      title: suggestion.title,
+      optional: suggestion.optional,
+      matchedObjectId: match?.object?.id || null,
+      present: Boolean(match),
+      score: Number((match?.score || 0).toFixed(2)),
+      feedback: match
+        ? `${suggestion.title} is present.`
+        : `Missing ${suggestion.title}.`,
+    };
+  });
+  const bySuggestionId = new Map(objectAssessments.map((assessment) => [assessment.suggestionId, assessment]));
+  const activeVisibleSuggestionIds = suggestionIdsForAnalyticStep(activeStep, activeMoment);
+  const activeMissingSuggestionIds = activeVisibleSuggestionIds.filter((id) => !bySuggestionId.get(id)?.present);
+  const answerReady = Boolean(activeMoment?.revealFormula || activeMoment?.revealFullSolution || activeIndex >= plan.buildSteps.length - 1);
+
   return {
     summary: {
       objectCount: snapshot.objects.length,
-      matchedRequiredObjects: snapshot.objects.length,
-      totalRequiredObjects: snapshot.objects.length,
-      completionRatio: 1,
+      matchedRequiredObjects: activeVisibleSuggestionIds.length - activeMissingSuggestionIds.length,
+      totalRequiredObjects: activeVisibleSuggestionIds.length,
+      completionRatio: activeVisibleSuggestionIds.length
+        ? Number(((activeVisibleSuggestionIds.length - activeMissingSuggestionIds.length) / activeVisibleSuggestionIds.length).toFixed(2))
+        : 1,
       currentStepId: activeStep?.id || currentStepId || null,
     },
-    objectAssessments: [],
-    stepAssessments: plan.buildSteps.map((step) => ({
-      stepId: step.id,
-      title: step.title,
-      complete: true,
-      missingObjectIds: [],
-      feedback: `${step.title} is available in the auto-rendered scene.`,
-    })),
+    objectAssessments,
+    stepAssessments: plan.buildSteps.map((step, index) => {
+      const moment = sceneMoments.find((entry) => entry.id === step.id)
+        || sceneMoments[index]
+        || null;
+      const expectedSuggestionIds = suggestionIdsForAnalyticStep(step, moment);
+      if (index < activeIndex) {
+        return {
+          stepId: step.id,
+          title: step.title,
+          complete: true,
+          missingObjectIds: [],
+          feedback: `${step.title} is already visible in the staged scene.`,
+        };
+      }
+      if (index > activeIndex) {
+        return {
+          stepId: step.id,
+          title: step.title,
+          complete: false,
+          missingObjectIds: expectedSuggestionIds.filter((id) => !activeVisibleSuggestionIds.includes(id)),
+          feedback: `${step.title} appears in a later analytic stage.`,
+        };
+      }
+      return {
+        stepId: step.id,
+        title: step.title,
+        complete: activeMissingSuggestionIds.length === 0,
+        missingObjectIds: activeMissingSuggestionIds,
+        feedback: activeMissingSuggestionIds.length
+          ? `The current analytic stage should show ${titlesForSuggestionIds(plan, activeMissingSuggestionIds).join(" and ")}.`
+          : `${step.title} is visible in the current analytic stage.`,
+      };
+    }),
     activeStep: activeStep
       ? {
         stepId: activeStep.id,
         title: activeStep.title,
-        complete: true,
-        missingObjectIds: [],
-        feedback: activeMoment?.goal || activeStep.instruction || "",
+        complete: activeMissingSuggestionIds.length === 0,
+        missingObjectIds: activeMissingSuggestionIds,
+        feedback: activeMissingSuggestionIds.length
+          ? `The current analytic stage should show ${titlesForSuggestionIds(plan, activeMissingSuggestionIds).join(" and ")}.`
+          : activeMoment?.goal || activeStep.instruction || "",
       }
       : null,
     answerGate: {
-      allowed: true,
-      reason: "The analytic scene is ready for explanation.",
+      allowed: answerReady && activeMissingSuggestionIds.length === 0,
+      reason: activeMissingSuggestionIds.length
+        ? "The current analytic stage is missing required visuals."
+        : answerReady
+          ? "The current analytic stage is ready for the calculation."
+          : "Keep following the staged scene before solving.",
     },
     guidance: {
       currentStepId: activeStep?.id || null,
       currentStepTitle: activeStep?.title || "",
-      nextRequiredSuggestionIds: [],
-      readyForPrediction: true,
-      matchedSuggestionIds: plan.objectSuggestions.map((suggestion) => suggestion.id),
-      coachFeedback: activeMoment?.goal || activeStep?.instruction || plan.sceneFocus?.primaryInsight || "Use the scene and formula together.",
-      missingTitles: [],
+      nextRequiredSuggestionIds: activeMissingSuggestionIds,
+      readyForPrediction: answerReady && activeMissingSuggestionIds.length === 0,
+      matchedSuggestionIds: activeVisibleSuggestionIds.filter((id) => bySuggestionId.get(id)?.present),
+      coachFeedback: activeMissingSuggestionIds.length
+        ? `The lesson scene should already include ${titlesForSuggestionIds(plan, activeMissingSuggestionIds).join(" and ")}. Reload the lesson if ${activeMissingSuggestionIds.length === 1 ? "it is" : "they are"} missing.`
+        : activeMoment?.prompt || activeMoment?.goal || activeStep?.instruction || plan.sceneFocus?.primaryInsight || "Use the current staged scene to reason about the problem.",
+      missingTitles: titlesForSuggestionIds(plan, activeMissingSuggestionIds),
       selectedObjectId: snapshot.selectedObjectId || null,
     },
   };

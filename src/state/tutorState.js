@@ -67,7 +67,7 @@ export class TutorState extends EventTarget {
   get transcriptCollapsed() { return this._state.transcriptCollapsed; }
   get followUpCollapsed() { return this._state.followUpCollapsed; }
   get error() { return this._state.error; }
-  get totalSteps() { return this._state.plan?.buildSteps?.length || 0; }
+  get totalSteps() { return this._stepEntries().length; }
 
   snapshot() {
     return {
@@ -232,7 +232,7 @@ export class TutorState extends EventTarget {
   }
 
   getCurrentStep() {
-    return this._state.plan?.buildSteps?.[this._state.currentStep] || null;
+    return this._stepEntries()[this._state.currentStep] || null;
   }
 
   useHint() {
@@ -356,6 +356,20 @@ export class TutorState extends EventTarget {
   _resetStageHintState() {
     this._state.hint_state.current_stage_hints = 0;
     this._state.hint_state.escalate_next = false;
+  }
+
+  _stepEntries() {
+    const plan = this._state.plan;
+    if (!plan) return [];
+
+    const lessonStages = Array.isArray(plan.lessonStages) ? plan.lessonStages.filter(Boolean) : [];
+    const buildSteps = Array.isArray(plan.buildSteps) ? plan.buildSteps.filter(Boolean) : [];
+
+    if (plan.experienceMode === "analytic_auto") {
+      return lessonStages.length ? lessonStages : buildSteps;
+    }
+
+    return buildSteps.length ? buildSteps : lessonStages;
   }
 }
 

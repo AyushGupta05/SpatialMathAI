@@ -488,6 +488,56 @@ test("POST /api/tutor advances analytic scene directives to the next moment afte
   assert.deepEqual(meta?.focusTargets, ["vector-ab-object"]);
 });
 
+test("POST /api/tutor evaluates short analytic vector replies instead of treating them as trivial", async () => {
+  const plan = buildAnalyticProgressPlan();
+  let conceptEvalCalled = false;
+  const tutorRoute = createTutorRoute({
+    streamModel: async function* streamTutor() {
+      yield "Now ";
+      yield "look at AB.";
+    },
+    conceptEvaluator: async () => {
+      conceptEvalCalled = true;
+      return {
+        verdict: "CORRECT",
+        confidence: 0.96,
+        what_was_right: "Identified the vectors from the plotted points",
+        gap: null,
+        misconception_type: null,
+        scene_cue: null,
+        tutor_tone: "encouraging",
+      };
+    },
+  });
+
+  const response = await tutorRoute.request("/", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      plan,
+      sceneSnapshot: {
+        objects: [
+          plan.objectSuggestions[0].object,
+          plan.objectSuggestions[1].object,
+          plan.objectSuggestions[2].object,
+        ],
+        selectedObjectId: null,
+      },
+      learningState: { currentStep: 0, learningStage: "build", history: [] },
+      userMessage: "I get AB and AC",
+      contextStepId: "plot-points",
+    }),
+  });
+
+  const payloads = parseSsePayloads(await response.text());
+  const meta = payloads.find((entry) => entry.type === "meta")?.content;
+
+  assert.equal(conceptEvalCalled, true);
+  assert.equal(meta?.stageStatus?.currentStageId, "show-ab");
+  assert.equal(meta?.sceneDirective?.stageId, "show-ab");
+  assert.deepEqual(meta?.sceneDirective?.visibleObjectIds, ["point-a", "point-b", "point-c", "vector-ab"]);
+});
+
 test("POST /api/tutor exposes the solution action on analytic final reveal stages", async () => {
   const plan = buildAnalyticPlan({ revealFormula: true, revealFullSolution: true });
   const tutorRoute = createTutorRoute({

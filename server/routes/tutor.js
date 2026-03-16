@@ -85,6 +85,151 @@ function sceneMomentForStageId(plan, stageId = null) {
   return plan.sceneMoments.find((moment) => moment.id === stageId) || null;
 }
 
+function suggestionForId(plan, suggestionId = null) {
+  if (!plan?.objectSuggestions?.length || !suggestionId) return null;
+  return plan.objectSuggestions.find((suggestion) => suggestion.id === suggestionId) || null;
+}
+
+function buildSceneSnapshotForMoment(plan, moment = null) {
+  if (!moment?.visibleObjectIds?.length) {
+    return { objects: [], selectedObjectId: null };
+  }
+  return {
+    objects: moment.visibleObjectIds
+      .map((suggestionId) => suggestionForId(plan, suggestionId)?.object || null)
+      .filter(Boolean)
+      .map((objectSpec) => ({ ...objectSpec })),
+    selectedObjectId: null,
+  };
+}
+
+function lineCountForMoment(plan, moment = null) {
+  if (!moment?.visibleObjectIds?.length) return 0;
+  return moment.visibleObjectIds.reduce((count, suggestionId) => {
+    const suggestion = suggestionForId(plan, suggestionId);
+    return suggestion?.object?.shape === "line" ? count + 1 : count;
+  }, 0);
+}
+
+function objectLabelsForMoment(plan, moment = null) {
+  if (!moment?.visibleObjectIds?.length) return [];
+  return moment.visibleObjectIds
+    .map((suggestionId) => suggestionForId(plan, suggestionId))
+    .filter(Boolean)
+    .map((suggestion) => String(suggestion.object?.label || suggestion.title || suggestion.id || "").trim())
+    .filter(Boolean);
+}
+
+function visualRevealRequestTarget(plan, learningState = {}, contextStepId = null, assessment = null, userMessage = "") {
+  if (plan?.experienceMode !== "analytic_auto" || !plan?.sceneMoments?.length) {
+    return null;
+  }
+
+  const lower = String(userMessage || "").toLowerCase();
+  const wantsVisualReveal = /\b(draw|show|reveal|display|visuali[sz]e|plot|add|bring up|move on|next|continue)\b/.test(lower);
+  const reportsMissingVisual = /\b(not|aren't|isn't|missing|dont|don't|do not|cant|can't)\b.*\b(drawn|shown|visible|there)\b/.test(lower);
+  if (!wantsVisualReveal && !reportsMissingVisual) {
+    return null;
+  }
+
+  const currentStage = currentStageForReply(plan, learningState, contextStepId, assessment);
+  const currentIndex = Math.max(0, plan.sceneMoments.findIndex((moment) => moment.id === currentStage?.id));
+  const futureMoments = plan.sceneMoments.slice(currentIndex + 1);
+  if (!futureMoments.length) {
+    return null;
+  }
+
+  const asksForFormula = /\bformula|solution|answer\b/.test(lower);
+  const requestedLabels = [...new Set(
+    (plan.objectSuggestions || [])
+      .map((suggestion) => String(suggestion.object?.label || suggestion.title || suggestion.id || "").trim())
+      .filter(Boolean)
+      .filter((label) => lower.includes(label.toLowerCase()))
+  )];
+  const pluralVectorRequest = /\bvectors\b/.test(lower) || /\blines\b/.test(lower);
+  const singularVectorRequest = /\bvector\b/.test(lower) || /\bline\b/.test(lower);
+
+  const scoredMoments = futureMoments
+    .filter((moment) => asksForFormula || !moment.revealFullSolution)
+    .map((moment, index) => {
+      const labels = objectLabelsForMoment(plan, moment);
+      const lineCount = lineCountForMoment(plan, moment);
+      let score = 0;
+
+      if (requestedLabels.length) {
+        score += requestedLabels.reduce((sum, label) => sum + (labels.includes(label) ? 4 : 0), 0);
+      }
+      if (pluralVectorRequest) {
+        score += lineCount >= 2 ? 4 : lineCount;
+      } else if (singularVectorRequest) {
+        score += lineCount >= 1 ? 2 : 0;
+      }
+      if (wantsVisualReveal && index === 0) {
+        score += 1;
+      }
+      if (reportsMissingVisual && lineCount > 0) {
+        score += 2;
+      }
+      if (!asksForFormula && moment.revealFormula) {
+        score -= 1;
+      }
+
+      return { moment, score, index };
+    })
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+
+  if (!scoredMoments.length) {
+    return futureMoments[0] || null;
+  }
+  if (scoredMoments[0].score <= 0) {
+    return futureMoments[0] || null;
+  }
+  return scoredMoments[0].moment;
+}
+
+async function streamAnalyticVisualRevealReply(c, requestPayload) {
+  const {
+    plan,
+    learningState = {},
+    contextStepId = null,
+    userMessage = "",
+  } = requestPayload;
+
+  const assessment = evaluateBuild(plan, requestPayload.sceneSnapshot, contextStepId);
+  const targetMoment = visualRevealRequestTarget(plan, learningState, contextStepId, assessment, userMessage);
+  if (!targetMoment) {
+    return null;
+  }
+
+  const targetAssessment = evaluateBuild(plan, buildSceneSnapshotForMoment(plan, targetMoment), targetMoment.id);
+  const responseMeta = buildTutorResponseMeta({
+    plan,
+    learningState,
+    contextStepId: targetMoment.id,
+    assessment: targetAssessment,
+    completionState: { complete: false, reason: null },
+    userMessage,
+    conceptVerdict: null,
+    responseKind: "non_evaluated",
+  });
+  responseMeta.stageStatus = {
+    ...(responseMeta.stageStatus || {}),
+    currentStageId: targetMoment.id,
+  };
+  responseMeta.nextLearningStage = learningState?.learningStage || "build";
+
+  const revealText = targetMoment.prompt
+    ? `Let's reveal the next visual step. ${targetMoment.prompt}`
+    : "Let's reveal the next visual step in the scene.";
+
+  return streamSSE(c, async (stream) => {
+    await stream.writeSSE({ data: JSON.stringify({ type: "meta", content: responseMeta }) });
+    await stream.writeSSE({ data: JSON.stringify({ type: "text", content: revealText }) });
+    await stream.writeSSE({ data: JSON.stringify({ type: "assessment", content: targetAssessment }) });
+    await stream.writeSSE({ data: JSON.stringify({ type: "done" }) });
+  });
+}
+
 export function createTutorRoute({
   streamModel = converseStreamWithModelFailover,
   freeformTurnGenerator = generateFreeformTutorTurn,
@@ -270,9 +415,12 @@ ${instruction}`.trim();
         tutor_tone: "encouraging",
       };
     } else if (!skipEvaluation && !revealSolution && !trivialityCheck(effectiveLearningState?.learningStage, userMessage)) {
+      const currentStage = currentStageForReply(plan, effectiveLearningState, contextStepId, assessment);
       const currentStep = plan.buildSteps?.find((s) => s.id === contextStepId)
         || plan.buildSteps?.[effectiveLearningState?.currentStep || 0];
-      const stageGoal = currentStep?.focusConcept
+      const stageGoal = currentStage?.goal
+        || currentStep?.instruction
+        || currentStep?.focusConcept
         || plan.sceneFocus?.primaryInsight
         || plan.learningMoments?.[effectiveLearningState?.learningStage]?.goal
         || "";
@@ -509,6 +657,18 @@ ${instruction}`.trim();
           await stream.writeSSE({ data: JSON.stringify({ type: "text", content: freeformTurn.text || "I am here. Ask me about the scene or tell me what to build." }) });
           await stream.writeSSE({ data: JSON.stringify({ type: "done" }) });
         });
+      }
+
+      const analyticRevealResponse = await streamAnalyticVisualRevealReply(c, {
+        plan,
+        sceneSnapshot,
+        sceneContext,
+        learningState,
+        userMessage,
+        contextStepId,
+      });
+      if (analyticRevealResponse) {
+        return analyticRevealResponse;
       }
       if (requires_evaluation === false) {
         return handleConversationalReply(c, {

@@ -103,6 +103,7 @@ let voiceStatus;
 let stageRail;
 let stageRailProgress;
 let stageRailGoal;
+let stageRailNext;
 let chatCheckpoint;
 let chatCheckpointPrompt;
 let checkpointYesBtn;
@@ -1321,6 +1322,8 @@ function updateStageRail() {
   if (!stageRail || !stageRailProgress || !stageRailGoal) return;
   if (!plan) {
     stageRail.classList.add("hidden");
+    stageRailNext?.classList.add("hidden");
+    if (stageRailNext) stageRailNext.disabled = true;
     updateComposerState();
     return;
   }
@@ -1351,6 +1354,13 @@ function updateStageRail() {
   } else {
     stageRailProgress.textContent = "Explore";
     stageRailGoal.textContent = "";
+  }
+
+  const showAnalyticNext = isAnalyticPlan(plan) && !isLessonComplete() && stageIndex < plan.lessonStages.length - 1;
+  if (stageRailNext) {
+    stageRailNext.classList.toggle("hidden", !showAnalyticNext);
+    stageRailNext.disabled = !showAnalyticNext;
+    stageRailNext.textContent = "Next";
   }
 
   renderAnalyticPanels(plan);
@@ -3123,6 +3133,13 @@ function bindEvents() {
     const isCollapsed = questionSection?.classList.contains("is-collapsed");
     setQuestionPanelCollapsed(!isCollapsed, { force: true });
   });
+  stageRailNext?.addEventListener("click", () => {
+    const plan = activePlan();
+    if (!plan || !isAnalyticPlan(plan) || isLessonComplete()) return;
+    clearLessonAutoAdvanceTimer();
+    setCheckpointState(null);
+    advanceLessonStage();
+  });
   voiceRecordBtn?.addEventListener("click", (event) => {
     event.preventDefault();
     void toggleVoiceMode();
@@ -3201,6 +3218,7 @@ function bindDom() {
   stageRail = document.getElementById("stageRail");
   stageRailProgress = document.getElementById("stageRailProgress");
   stageRailGoal = document.getElementById("stageRailGoal");
+  stageRailNext = document.getElementById("stageRailNext");
   chatCheckpoint = document.getElementById("chatCheckpoint");
   chatCheckpointPrompt = document.getElementById("chatCheckpointPrompt");
   checkpointYesBtn = document.getElementById("checkpointYesBtn");

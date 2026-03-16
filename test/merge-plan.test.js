@@ -128,3 +128,190 @@ test("mergeGeneratedPlan prefers the cleaner baseline scaffold for multimodal so
     baselinePlan.buildSteps.map((step) => step.id),
   );
 });
+
+test("mergeGeneratedPlan keeps an analytic baseline scaffold intact", () => {
+  const baselinePlan = normalizeScenePlan({
+    problem: {
+      question: "Find the angle between AB and AC.",
+      questionType: "spatial",
+      mode: "guided",
+    },
+    experienceMode: "analytic_auto",
+    sourceSummary: {
+      inputMode: "text",
+      rawQuestion: "Find the angle between AB and AC.",
+      cleanedQuestion: "Find the angle between AB and AC.",
+      givens: ["A(0,0,0)", "B(3,-3,4)", "C(-1,3,3)"],
+      labels: [],
+      relationships: [],
+      diagramSummary: "",
+    },
+    objectSuggestions: [{
+      id: "point-a",
+      title: "Point A",
+      object: {
+        id: "point-a-object",
+        shape: "pointMarker",
+        label: "A",
+        position: [0, 0, 0],
+        params: { radius: 0.1 },
+      },
+    }],
+    buildSteps: [{
+      id: "plot-points",
+      title: "Plot the points",
+      instruction: "Read the plotted givens.",
+      action: "observe",
+      suggestedObjectIds: ["point-a"],
+      requiredObjectIds: [],
+    }],
+    lessonStages: [{
+      id: "plot-points",
+      title: "Plot the points",
+      goal: "Read the plotted givens.",
+      tutorIntro: "The givens are shown.",
+      highlightTargets: ["point-a-object"],
+    }],
+    sceneMoments: [{
+      id: "plot-points",
+      title: "Plot the points",
+      prompt: "The givens are shown.",
+      goal: "Read the plotted givens.",
+      focusTargets: ["point-a-object"],
+      visibleObjectIds: ["point-a"],
+      visibleOverlayIds: ["analytic-axes"],
+      cameraBookmarkId: "overview",
+      revealFormula: false,
+      revealFullSolution: false,
+    }],
+    cameraBookmarks: [{
+      id: "overview",
+      label: "Overview",
+      position: [8, 6, 8],
+      target: [0, 0, 0],
+    }],
+    sceneOverlays: [{
+      id: "analytic-axes",
+      type: "coordinate-frame",
+      bounds: { x: [-4, 4], y: [-4, 4], z: [-4, 4], tickStep: 1 },
+    }],
+    answerScaffold: {
+      formula: "cos(theta) = (AB dot AC) / (|AB||AC|)",
+    },
+    analyticContext: {
+      subtype: "vector_angle",
+      formulaCard: {
+        title: "Angle Between Vectors",
+        formula: "cos(theta) = (AB dot AC) / (|AB||AC|)",
+        explanation: "Compare the two vectors from the same anchor.",
+      },
+      solutionSteps: [{
+        id: "stage-1",
+        title: "Read the givens",
+        formula: "",
+        explanation: "Start with the plotted points.",
+      }],
+    },
+  });
+
+  const novaPlan = normalizeScenePlan({
+    problem: {
+      question: "ignored",
+      questionType: "spatial",
+      mode: "guided",
+    },
+    sourceSummary: {
+      inputMode: "multimodal",
+      rawQuestion: "ignored",
+      cleanedQuestion: "ignored",
+      givens: ["diagram labels"],
+      labels: ["AB", "AC"],
+      relationships: ["Angle at A"],
+      diagramSummary: "A worksheet image with labelled vectors.",
+    },
+    objectSuggestions: [
+      {
+        id: "nova-a",
+        title: "Point A",
+        object: {
+          id: "nova-a-object",
+          shape: "pointMarker",
+          label: "A",
+          position: [1, 1, 0],
+          params: { radius: 0.1 },
+        },
+      },
+      {
+        id: "nova-b",
+        title: "Point B",
+        object: {
+          id: "nova-b-object",
+          shape: "pointMarker",
+          label: "B",
+          position: [5, 1, 0],
+          params: { radius: 0.1 },
+        },
+      },
+    ],
+    buildSteps: [
+      {
+        id: "nova-stage-1",
+        title: "Nova stage 1",
+        instruction: "Different scaffold stage.",
+        action: "observe",
+        suggestedObjectIds: ["nova-a"],
+        requiredObjectIds: [],
+      },
+      {
+        id: "nova-stage-2",
+        title: "Nova stage 2",
+        instruction: "Another stage.",
+        action: "observe",
+        suggestedObjectIds: ["nova-a", "nova-b"],
+        requiredObjectIds: [],
+      },
+    ],
+    lessonStages: [
+      {
+        id: "nova-stage-1",
+        title: "Nova stage 1",
+        goal: "Different stage goal.",
+        tutorIntro: "Nova intro.",
+        highlightTargets: ["nova-a-object"],
+      },
+      {
+        id: "nova-stage-2",
+        title: "Nova stage 2",
+        goal: "Another stage goal.",
+        tutorIntro: "Nova follow-up.",
+        highlightTargets: ["nova-b-object"],
+      },
+    ],
+  });
+
+  const merged = mergeGeneratedPlan({
+    baselinePlan,
+    novaPlan,
+    workingQuestion: baselinePlan.problem.question,
+    mode: "guided",
+  });
+
+  assert.equal(merged.experienceMode, "analytic_auto");
+  assert.deepEqual(
+    merged.objectSuggestions.map((suggestion) => suggestion.id),
+    baselinePlan.objectSuggestions.map((suggestion) => suggestion.id),
+  );
+  assert.deepEqual(
+    merged.buildSteps.map((step) => step.id),
+    baselinePlan.buildSteps.map((step) => step.id),
+  );
+  assert.deepEqual(
+    merged.lessonStages.map((stage) => stage.id),
+    baselinePlan.lessonStages.map((stage) => stage.id),
+  );
+  assert.deepEqual(
+    merged.sceneMoments.map((moment) => moment.id),
+    baselinePlan.sceneMoments.map((moment) => moment.id),
+  );
+  assert.equal(merged.sourceSummary.inputMode, "multimodal");
+});

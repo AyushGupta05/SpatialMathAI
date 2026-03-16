@@ -22,6 +22,25 @@ function shouldPreferBaselineMetricScaffold(baselinePlan = {}, novaPlan = {}) {
 
 export function mergeGeneratedPlan({ baselinePlan, novaPlan, workingQuestion, mode }) {
   const preserveAnalytic = baselinePlan?.experienceMode === "analytic_auto";
+  if (preserveAnalytic) {
+    return normalizeScenePlan({
+      ...baselinePlan,
+      problem: {
+        ...baselinePlan.problem,
+        ...novaPlan.problem,
+        question: workingQuestion,
+        mode,
+      },
+      sourceSummary: {
+        ...baselinePlan.sourceSummary,
+        ...novaPlan.sourceSummary,
+      },
+      agentTrace: (novaPlan.agentTrace?.length || 0)
+        ? novaPlan.agentTrace
+        : baselinePlan.agentTrace,
+      demoPreset: novaPlan.demoPreset || baselinePlan.demoPreset || null,
+    });
+  }
   const preferNovaScaffold = !preserveAnalytic && novaPlan?.experienceMode === "analytic_auto";
   const preferBaselineMetricScaffold = !preserveAnalytic
     && !preferNovaScaffold

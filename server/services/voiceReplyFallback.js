@@ -231,7 +231,12 @@ async function generateGuidedVoiceReply({
   ) {
     const currentStep = plan.buildSteps?.find((step) => step.id === contextStepId)
       || plan.buildSteps?.[learningState?.currentStep || 0];
-    const stageGoal = currentStep?.focusConcept
+    const currentStage = plan.lessonStages?.find((stage) => stage.id === (contextStepId || currentStep?.id))
+      || plan.lessonStages?.[learningState?.currentStep || 0]
+      || null;
+    const stageGoal = currentStage?.goal
+      || currentStep?.instruction
+      || currentStep?.focusConcept
       || plan.sceneFocus?.primaryInsight
       || plan.learningMoments?.[learningState?.learningStage]?.goal
       || "";
