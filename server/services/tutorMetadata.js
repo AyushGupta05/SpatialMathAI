@@ -151,6 +151,8 @@ export function buildTutorResponseMeta({
     focusTargets: mergedFocusTargets,
     checkpoint: completionState?.complete
       ? null
+      : plan.experienceMode === "analytic_auto"
+      ? null
       : assessment?.activeStep?.complete || assessment?.guidance?.readyForPrediction
       ? {
         prompt: stage?.checkpointPrompt || "Does this look correct?",

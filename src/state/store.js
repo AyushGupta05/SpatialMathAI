@@ -15,9 +15,4 @@ export const appState = {
     thumbsUp: false,
     transformActive: false,
   },
-  calibration: {
-    scaleK: 1,
-    smoothingAlpha: 0.38,
-    baselineDistance: 0.1,
-  },
 };

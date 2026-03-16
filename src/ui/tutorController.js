@@ -31,7 +31,7 @@ import { hasMathMarkup, renderMathBlockHtml, renderRichTextHtml } from "./mathMa
 import { MicrophoneCapture } from "./microphoneCapture.js";
 import { PcmAudioPlayer } from "./pcmAudioPlayer.js";
 import { hideEvidence, initEvidencePanel, registerEvidenceAutoClose, showEvidence } from "./evidencePanel.js";
-import { extractPastedQuestionImageFile } from "./questionImage.js";
+import { extractPastedQuestionImageFile, prepareQuestionImageForUpload } from "./questionImage.js";
 import {
   normalizeTutorReplyText,
   shouldStartLessonFromComposer,
@@ -63,6 +63,7 @@ let voiceUserSpeaking = false;
 let voiceSessionState = "idle";
 let voiceBufferedChunks = [];
 let voiceAssistantBargeInUnlockAt = 0;
+let voicePlaybackSyncToken = 0;
 let lastVoiceAssessment = null;
 let lastVoiceTranscript = "";
 let lastAnnouncedStageKey = null;
@@ -459,15 +460,56 @@ function ensureVoiceAudioPlayer() {
   return voiceAudioPlayer;
 }
 
+function localVoicePlaybackActive() {
+  return Boolean(voiceAudioPlayer?.isPlaying());
+}
+
+function showVoicePlaybackStatus() {
+  updateVoiceVisualState("responding");
+  updateVoiceStatus("Nova is responding...", "ready");
+}
+
+function queueVoicePlaybackRelease() {
+  const player = voiceAudioPlayer;
+  if (!player) {
+    voiceAssistantBargeInUnlockAt = performance.now() + 320;
+    if (!voiceTurnOpen && !voiceUserSpeaking) {
+      setVoiceStatusForState("idle");
+    }
+    return;
+  }
+
+  const syncToken = ++voicePlaybackSyncToken;
+  player.whenIdle().then(() => {
+    if (syncToken !== voicePlaybackSyncToken) {
+      return;
+    }
+    voiceAssistantBargeInUnlockAt = performance.now() + 320;
+    if (!voiceTurnOpen && !voiceUserSpeaking) {
+      setVoiceStatusForState("idle");
+    }
+  }).catch(() => {
+    if (syncToken !== voicePlaybackSyncToken) {
+      return;
+    }
+    voiceAssistantBargeInUnlockAt = performance.now() + 320;
+    if (!voiceTurnOpen && !voiceUserSpeaking) {
+      setVoiceStatusForState("idle");
+    }
+  });
+}
+
 function canInterruptAssistantWithSpeech(level = 0) {
-  const player = ensureVoiceAudioPlayer();
-  if (!player.isPlaying()) {
-    return true;
+  if (localVoicePlaybackActive()) {
+    return false;
   }
   if (performance.now() < voiceAssistantBargeInUnlockAt) {
     return false;
   }
-  return Number(level) >= 0.06;
+  if (voiceSessionState === "responding") {
+    return Number(level) >= 0.06;
+  }
+  return true;
 }
 
 function resetVoiceDraft() {
@@ -549,6 +591,7 @@ async function resetVoiceSessionState() {
   voiceSessionState = "idle";
   clearVoiceBufferedChunks();
   voiceAssistantBargeInUnlockAt = 0;
+  voicePlaybackSyncToken += 1;
   if (activeMicCapture) {
     await activeMicCapture.stop();
     activeMicCapture = null;
@@ -1795,9 +1838,12 @@ async function handleQuestionSubmit(overrides = {}) {
   setQuestionStatus("Building a staged lesson from your prompt and scene...", "loading");
 
   try {
+    const uploadImageFile = imageFile
+      ? await prepareQuestionImageForUpload(imageFile)
+      : null;
     const { scenePlan } = await requestScenePlan({
       questionText,
-      imageFile,
+      imageFile: uploadImageFile,
       mode: "guided",
       sceneSnapshot: currentSnapshot(),
       callbacks: {
@@ -2398,6 +2444,11 @@ function handleVoiceSessionEvent(event = {}) {
   switch (event.type) {
     case "state":
       voiceSessionState = event.state || "idle";
+      if (voiceSessionState === "idle" && localVoicePlaybackActive()) {
+        showVoicePlaybackStatus();
+        queueVoicePlaybackRelease();
+        return;
+      }
       setVoiceStatusForState(voiceSessionState);
       return;
     case "assessment":
@@ -2432,10 +2483,13 @@ function handleVoiceSessionEvent(event = {}) {
       voiceTurnOpen = false;
       voiceUserSpeaking = false;
       voiceAssistantBargeInUnlockAt = 0;
+      voicePlaybackSyncToken += 1;
       ensureVoiceAudioPlayer().stop();
       setVoiceStatusForState("idle");
       return;
-    case "done":
+    case "done": {
+      const draft = currentVoiceDraft();
+      const hadAssistantAudio = Boolean(draft.assistantAudioStarted);
       if (event.inputTranscript) {
         setVoiceTranscript(event.inputTranscript);
       }
@@ -2445,13 +2499,18 @@ function handleVoiceSessionEvent(event = {}) {
       voiceConversationId = event.conversationId || voiceConversationId;
       voiceTurnOpen = false;
       voiceUserSpeaking = false;
-      voiceAssistantBargeInUnlockAt = 0;
       applyVoiceTurnResult(event);
-      if (!currentVoiceDraft().assistantAudioStarted) {
+      if (!hadAssistantAudio) {
         accumulatedTutorText = event.assistantText || "";
       }
       voiceStreamDraft = null;
-      setVoiceStatusForState("idle");
+      if (hadAssistantAudio && localVoicePlaybackActive()) {
+        showVoicePlaybackStatus();
+        queueVoicePlaybackRelease();
+      } else {
+        voiceAssistantBargeInUnlockAt = hadAssistantAudio ? performance.now() + 320 : 0;
+        setVoiceStatusForState("idle");
+      }
       returnControlToLearner({
         verdict: lastVoiceAssessment?.verdict || event.conceptVerdict?.verdict || null,
         stage: getCurrentStage(),
@@ -2460,6 +2519,7 @@ function handleVoiceSessionEvent(event = {}) {
         document.dispatchEvent(new CustomEvent("demo:voice-turn-complete"));
       }
       return;
+    }
     default:
       return;
   }
@@ -2573,7 +2633,7 @@ async function startVoiceConversationTurn() {
 
 async function handleVoiceSpeechStart({ level } = {}) {
   if (!voiceModeEnabled || voiceUserSpeaking) return;
-  if (voiceSessionState === "responding" && !canInterruptAssistantWithSpeech(level)) {
+  if (!canInterruptAssistantWithSpeech(level)) {
     return;
   }
   voiceUserSpeaking = true;
@@ -2653,6 +2713,7 @@ async function disableVoiceMode() {
   voiceSessionState = "idle";
   clearVoiceBufferedChunks();
   voiceAssistantBargeInUnlockAt = 0;
+  voicePlaybackSyncToken += 1;
   if (activeMicCapture) {
     await activeMicCapture.stop().catch(() => {});
     activeMicCapture = null;

@@ -41,7 +41,7 @@ function buildPlan() {
   });
 }
 
-function buildAnalyticPlan() {
+function buildAnalyticPlan({ revealFormula = false, revealFullSolution = false } = {}) {
   return normalizeScenePlan({
     problem: {
       question: "Line-plane intersection",
@@ -119,8 +119,8 @@ function buildAnalyticPlan() {
       visibleObjectIds: ["line-main"],
       visibleOverlayIds: ["analytic-axes"],
       cameraBookmarkId: "overview",
-      revealFormula: false,
-      revealFullSolution: false,
+      revealFormula,
+      revealFullSolution,
     }],
     sceneOverlays: [{
       id: "analytic-axes",
@@ -206,7 +206,7 @@ test("POST /api/tutor includes deterministic completion metadata for correct ans
   assert.equal(meta?.stageStatus?.canAdvance, false);
 });
 
-test("POST /api/tutor includes scene directives for analytic lessons", async () => {
+test("POST /api/tutor keeps analytic opening actions hint-first before formula reveal", async () => {
   const plan = buildAnalyticPlan();
   const tutorRoute = createTutorRoute({
     streamModel: async function* streamTutor() {
@@ -234,7 +234,111 @@ test("POST /api/tutor includes scene directives for analytic lessons", async () 
   assert.equal(meta.sceneDirective.stageId, "observe");
   assert.equal(meta.sceneDirective.cameraBookmarkId, "overview");
   assert.deepEqual(meta.sceneDirective.visibleOverlayIds, ["analytic-axes"]);
+  assert.equal(meta?.checkpoint, null);
+  assert.deepEqual(meta.actions.map((action) => action.id), ["show_hint"]);
+  assert.equal(meta.actions[0].label, "What should I notice?");
+});
+
+test("POST /api/tutor unlocks analytic formula actions when the current moment reveals them", async () => {
+  const plan = buildAnalyticPlan({ revealFormula: true });
+  const tutorRoute = createTutorRoute({
+    streamModel: async function* streamTutor() {
+      yield "Rotate ";
+      yield "the scene.";
+    },
+  });
+
+  const response = await tutorRoute.request("/", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      plan,
+      sceneSnapshot: { objects: [], selectedObjectId: null },
+      learningState: { currentStep: 0, learningStage: "build", history: [] },
+      userMessage: "Show me the setup",
+      contextStepId: "observe",
+    }),
+  });
+
+  const payloads = parseSsePayloads(await response.text());
+  const meta = payloads.find((entry) => entry.type === "meta")?.content;
+
   assert.deepEqual(meta.actions.map((action) => action.id), ["show_hint", "show_formula"]);
+  assert.equal(meta.actions[0].label, "Give me a hint");
+});
+
+test("POST /api/tutor exposes the solution action on analytic final reveal stages", async () => {
+  const plan = buildAnalyticPlan({ revealFormula: true, revealFullSolution: true });
+  const tutorRoute = createTutorRoute({
+    streamModel: async function* streamTutor() {
+      yield "Rotate ";
+      yield "the scene.";
+    },
+  });
+
+  const response = await tutorRoute.request("/", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      plan,
+      sceneSnapshot: { objects: [], selectedObjectId: null },
+      learningState: { currentStep: 0, learningStage: "build", history: [] },
+      userMessage: "What does this tell me?",
+      contextStepId: "observe",
+    }),
+  });
+
+  const payloads = parseSsePayloads(await response.text());
+  const meta = payloads.find((entry) => entry.type === "meta")?.content;
+
+  assert.deepEqual(meta.actions.map((action) => action.id), ["show_hint", "show_formula", "view_solution"]);
+  assert.equal(meta.actions.at(-1).label, "Show solution");
+});
+
+test("POST /api/tutor escalates stuck analytic learners to the solution action only", async () => {
+  const plan = buildAnalyticPlan({ revealFormula: true, revealFullSolution: true });
+  const tutorRoute = createTutorRoute({
+    streamModel: async function* streamTutor() {
+      yield "Let's look again.";
+    },
+    conceptEvaluator: async () => ({
+      verdict: "STUCK",
+      confidence: 0.4,
+      what_was_right: "",
+      gap: "Missed the visible intersection",
+      misconception_type: null,
+      scene_cue: null,
+      tutor_tone: "encouraging",
+    }),
+  });
+
+  const response = await tutorRoute.request("/", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      plan,
+      sceneSnapshot: { objects: [], selectedObjectId: null },
+      learningState: {
+        currentStep: 0,
+        learningStage: "check",
+        history: [],
+        hint_state: {
+          current_stage_hints: 2,
+          max_hints: 3,
+          escalate_next: false,
+          total_stuck_count: 2,
+        },
+      },
+      userMessage: "I still don't get it",
+      contextStepId: "observe",
+    }),
+  });
+
+  const payloads = parseSsePayloads(await response.text());
+  const meta = payloads.find((entry) => entry.type === "meta")?.content;
+
+  assert.deepEqual(meta.actions.map((action) => action.id), ["view_solution"]);
+  assert.equal(meta.actions[0].label, "Show solution");
 });
 
 test("POST /api/tutor reveals the worked solution deterministically when asked directly", async () => {

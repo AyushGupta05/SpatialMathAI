@@ -13,6 +13,17 @@ export class PcmAudioPlayer {
     this.context = null;
     this.nextStartTime = 0;
     this.sources = new Set();
+    this.idleResolvers = new Set();
+  }
+
+  resolveIdleWaiters() {
+    if (this.isPlaying()) {
+      return;
+    }
+    for (const resolve of this.idleResolvers) {
+      resolve();
+    }
+    this.idleResolvers.clear();
   }
 
   async ensureContext(sampleRate = this.sampleRate) {
@@ -52,6 +63,7 @@ export class PcmAudioPlayer {
       if (!this.sources.size) {
         this.nextStartTime = Math.max(this.nextStartTime, context.currentTime);
       }
+      this.resolveIdleWaiters();
     };
   }
 
@@ -69,6 +81,7 @@ export class PcmAudioPlayer {
     } else {
       this.nextStartTime = 0;
     }
+    this.resolveIdleWaiters();
   }
 
   isPlaying() {
@@ -88,5 +101,15 @@ export class PcmAudioPlayer {
     }
     this.context = null;
     this.nextStartTime = 0;
+    this.resolveIdleWaiters();
+  }
+
+  whenIdle() {
+    if (!this.isPlaying()) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      this.idleResolvers.add(resolve);
+    });
   }
 }

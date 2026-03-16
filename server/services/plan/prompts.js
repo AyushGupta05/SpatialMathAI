@@ -14,11 +14,14 @@ Return ONLY valid JSON with this exact structure:
 
 Rules:
 - Combine text and image evidence when both are present.
+- Read all legible worksheet text, equations, coordinates, and labels from the image into rawQuestion, cleanedQuestion, givens, and labels.
+- Keep formula text mathematically faithful when you transcribe it from the image.
 - If text and image disagree, prefer the explicit text and mention the conflict briefly in relationships.
 - Put direct text-image disagreements into conflicts.
 - Keep cleanedQuestion concise and student-facing.
 - Focus on geometric objects, measurements, labels, and relationships that would help build a 3D lesson.
 - Do not describe a point as "the origin" unless its coordinates are literally (0,0,0). If vectors share a starting point that is not (0,0,0), call it a shared anchor or common start point instead.
+- Escape backslashes and quotes so the JSON is valid.
 - Return JSON only.`;
 
 export const PLAN_SYSTEM_PROMPT = `You are designing an interactive spatial reasoning tutor experience.

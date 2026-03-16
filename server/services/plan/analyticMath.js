@@ -359,7 +359,7 @@ export function buildAnalyticLessonStages(sceneMoments = []) {
       : "Use the scene cues, then move to the next visual step when the relationship is clear.",
     highlightTargets: moment.focusTargets || [],
     suggestedActions: [],
-    checkpointPrompt: "Does that visual make sense?",
+    checkpointPrompt: "",
     freeQuestionAnchor: moment.goal || moment.prompt || "",
     mistakeProbe: moment.mistakeProbe || "Point to the visual step that feels confusing and explain why.",
   }));

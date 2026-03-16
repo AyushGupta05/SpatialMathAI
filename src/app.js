@@ -1,6 +1,5 @@
 import { computeGeometry } from "./core/geometry.js";
 import { clamp } from "./core/math.js";
-import { deriveScaleK, loadCalibration, saveCalibration } from "./calibration/store.js";
 import { InteractionPipeline } from "./signals/interactionPipeline.js";
 import { appState } from "./state/store.js";
 import { tutorState } from "./state/tutorState.js";
@@ -46,8 +45,17 @@ import {
   PLACEMENT_NEAR_SNAP_BASE, PLACEMENT_NEAR_SNAP_GAIN, PLACEMENT_SURFACE_NUDGE_LIMIT,
   SHAPE_OPTIONS, SIGNALS,
 } from "./config/constants.js";
+import { shouldIgnoreSceneHotkeys } from "./ui/sceneHotkeys.js";
 
 const MODEL_PATH = new URL("../models/hand_landmarker.task", window.location.href).toString();
+const DEFAULT_SMOOTHING_ALPHA = 0.38;
+const DEFAULT_TRACKING_PROFILE = "balanced";
+const DEFAULT_BASE_SIZE = 1;
+const DEFAULT_SNAP_ENABLED = false;
+const DEFAULT_GRID_STEP = 0.25;
+const DEFAULT_TRANSFORM_SNAP_MODE = "off";
+const DEFAULT_NAVIGATION_MODE = "blender";
+const DEFAULT_ROTATION_STEP_DEG = 15;
 
 export function bootstrapApp() {
   const webcamEl = document.querySelector("#webcam");
@@ -63,17 +71,7 @@ export function bootstrapApp() {
   const resetViewSceneBtn = document.querySelector("#resetViewSceneBtn");
   const loadSceneInput = document.querySelector("#loadSceneInput");
   const shapeTypeEl = document.querySelector("#shapeType");
-  const sizeInputEl = document.querySelector("#sizeInput");
   const colorInputEl = document.querySelector("#colorInput");
-  const smoothingInputEl = document.querySelector("#smoothingInput");
-  const trackingProfileEl = document.querySelector("#trackingProfile");
-  const calibrateBtn = document.querySelector("#calibrateBtn");
-  const calibrationPresetEl = document.querySelector("#calibrationPreset");
-  const snapToggleEl = document.querySelector("#snapToggle");
-  const gridStepInputEl = document.querySelector("#gridStepInput");
-  const transformSnapModeEl = document.querySelector("#transformSnapMode");
-  const navigationModeEl = document.querySelector("#navigationMode");
-  const rotationStepInputEl = document.querySelector("#rotationStepInput");
   const debugStateEl = document.querySelector("#debugState");
   const intentBadgeEl = document.querySelector("#intentBadge");
   const statusEl = document.querySelector("#status");
@@ -85,14 +83,12 @@ export function bootstrapApp() {
 
   const ctx = overlayEl.getContext("2d");
   const world = createWorld(worldMount);
-  if (navigationModeEl && typeof world.setNavigationMode === "function") {
-    world.setNavigationMode(navigationModeEl.value || "blender");
+  if (typeof world.setNavigationMode === "function") {
+    world.setNavigationMode(DEFAULT_NAVIGATION_MODE);
   }
 
-  appState.calibration = loadCalibration();
-  const pipeline = new InteractionPipeline({ alpha: appState.calibration.smoothingAlpha });
-  smoothingInputEl.value = String(appState.calibration.smoothingAlpha);
-  pipeline.setProfile("balanced");
+  const pipeline = new InteractionPipeline({ alpha: DEFAULT_SMOOTHING_ALPHA });
+  pipeline.setProfile(DEFAULT_TRACKING_PROFILE);
 
   let handLandmarker = null;
   let stream = null;
@@ -128,12 +124,6 @@ export function bootstrapApp() {
   const sceneEventTarget = new EventTarget();
   const placedMeshes = sceneRuntime.meshes;
   const MAX_MESHES = 220;
-  const calibrationPresets = {
-    custom: null,
-    desk: { scaleK: 1.12, smoothingAlpha: 0.46, baselineDistance: 0.085 },
-    room: { scaleK: 1.0, smoothingAlpha: 0.38, baselineDistance: 0.11 },
-    far: { scaleK: 0.9, smoothingAlpha: 0.3, baselineDistance: 0.145 },
-  };
 
   const selectionRing = world.createSelectionRing();
   const rotationGuide = world.createRotationGuide();
@@ -147,6 +137,26 @@ export function bootstrapApp() {
   const placementRayDirection = new THREE.Vector3();
   const dragPlaneNormal = new THREE.Vector3();
   const lineDepthDirection = new THREE.Vector3();
+
+  function defaultBaseSize() {
+    return DEFAULT_BASE_SIZE;
+  }
+
+  function snapEnabled() {
+    return DEFAULT_SNAP_ENABLED;
+  }
+
+  function gridStep() {
+    return DEFAULT_GRID_STEP;
+  }
+
+  function transformSnapMode() {
+    return DEFAULT_TRANSFORM_SNAP_MODE;
+  }
+
+  function rotationStepDeg() {
+    return DEFAULT_ROTATION_STEP_DEG;
+  }
 
   function setActiveMesh(mesh) {
     if (activeMesh?.material?.emissive) {
@@ -262,7 +272,7 @@ export function bootstrapApp() {
   }
 
   function freePlacementObject(shape) {
-    const params = baseSizeToParams(shape, Number(sizeInputEl?.value || 1));
+    const params = baseSizeToParams(shape, defaultBaseSize());
     return normalizeSceneObject({
       shape,
       color: colorInputEl?.value || "#7cf7e4",
@@ -824,7 +834,7 @@ export function bootstrapApp() {
   }
 
   function placementNearSnapDistance() {
-    const size = Number(sizeInputEl?.value || 1);
+    const size = defaultBaseSize();
     return clamp((size * PLACEMENT_NEAR_SNAP_GAIN) + PLACEMENT_NEAR_SNAP_BASE, 0.14, 0.48);
   }
 
@@ -1087,7 +1097,7 @@ export function bootstrapApp() {
           currentLineThickness(),
           color
         )
-        : world.buildMesh(shape, Number(sizeInputEl.value), color);
+        : world.buildMesh(shape, defaultBaseSize(), color);
       const oldGeometry = mesh.geometry;
       const oldMaterial = mesh.material;
       mesh.geometry = nextMesh.geometry;
@@ -1588,8 +1598,8 @@ export function bootstrapApp() {
   }
 
   function snapValue(v) {
-    if (snapToggleEl.value !== "on") return v;
-    const step = Number(gridStepInputEl.value || 0.25);
+    if (!snapEnabled()) return v;
+    const step = gridStep();
     return Math.round(v / step) * step;
   }
 
@@ -1733,16 +1743,16 @@ export function bootstrapApp() {
   }
 
   function shouldSnapPosition() {
-    return transformSnapModeEl.value === "position" || transformSnapModeEl.value === "all";
+    return transformSnapMode() === "position" || transformSnapMode() === "all";
   }
 
   function shouldSnapRotation() {
-    return transformSnapModeEl.value === "rotation" || transformSnapModeEl.value === "all";
+    return transformSnapMode() === "rotation" || transformSnapMode() === "all";
   }
 
   function snapRotation(rad) {
     if (!shouldSnapRotation()) return rad;
-    const stepDeg = Number(rotationStepInputEl.value || 15);
+    const stepDeg = rotationStepDeg();
     const step = (Math.PI / 180) * stepDeg;
     return Math.round(rad / step) * step;
   }
@@ -2434,7 +2444,7 @@ export function bootstrapApp() {
     }
     start[axis] += delta;
     end[axis] += delta;
-    applyLineEndpoints(mesh, start, end, Number(mesh.userData.baseSize || sizeInputEl.value));
+    applyLineEndpoints(mesh, start, end, Number(mesh.userData.baseSize || defaultBaseSize()));
   }
 
   function updateMeshPositionAxisValue(objectSerial, axis, rawValue) {
@@ -2792,12 +2802,16 @@ export function bootstrapApp() {
   function refreshDebug() {
     debugStateEl.textContent = JSON.stringify({
       interaction: appState.interaction,
-      calibration: appState.calibration,
       snap: {
-        enabled: snapToggleEl.value === "on",
-        step: Number(gridStepInputEl.value),
-        transformMode: transformSnapModeEl.value,
-        rotationStepDeg: Number(rotationStepInputEl.value),
+        enabled: snapEnabled(),
+        step: gridStep(),
+        transformMode: transformSnapMode(),
+        rotationStepDeg: rotationStepDeg(),
+      },
+      tracking: {
+        profile: DEFAULT_TRACKING_PROFILE,
+        smoothingAlpha: DEFAULT_SMOOTHING_ALPHA,
+        navigationMode: DEFAULT_NAVIGATION_MODE,
       },
       shape: appState.shape,
       dimension: Number(appState.dimension.toFixed(3)),
@@ -2889,7 +2903,7 @@ export function bootstrapApp() {
         dragSession.mesh,
         dragSession.lineStart.clone().add(delta),
         dragSession.lineEnd.clone().add(delta),
-        Number(dragSession.mesh.userData.baseSize || sizeInputEl.value)
+        Number(dragSession.mesh.userData.baseSize || defaultBaseSize())
       );
       dragSession.mesh.position.copy(targetPosition);
     } else {
@@ -3300,7 +3314,7 @@ export function bootstrapApp() {
           updateMeshMetadata(transformSession.mesh);
           updateGeometryMetrics(
             transformSession.mesh.userData.shape || shapeTypeEl.value,
-            transformSession.mesh.userData.baseSize || sizeInputEl.value,
+            transformSession.mesh.userData.baseSize || defaultBaseSize(),
             transformSession.mesh
           );
 
@@ -3434,37 +3448,12 @@ export function bootstrapApp() {
     setIntent("stopped", "idle");
   }
 
-  function bindValueEvents(el, handler) {
-    if (!el) return;
-    el.addEventListener("input", handler);
-    el.addEventListener("change", handler);
-  }
-
   document.addEventListener("visibilitychange", () => {
     if (document.hidden && running) {
       stop();
       setStatus("Paused (tab hidden)", "idle");
       setIntent("paused", "idle");
     }
-  });
-
-  bindValueEvents(smoothingInputEl, () => {
-    const alpha = Number(smoothingInputEl.value);
-    appState.calibration.smoothingAlpha = alpha;
-    pipeline.setAlpha(alpha);
-    saveCalibration(appState.calibration);
-    refreshDebug();
-  });
-
-  trackingProfileEl.addEventListener("change", () => {
-    const profile = trackingProfileEl.value;
-    pipeline.setProfile(profile);
-    if (profile === "stable") smoothingInputEl.value = "0.52";
-    else if (profile === "responsive") smoothingInputEl.value = "0.24";
-    else smoothingInputEl.value = String(appState.calibration.smoothingAlpha);
-
-    setStatus(`Tracking profile: ${profile}`, "ok");
-    refreshDebug();
   });
 
   function applySidebarShapeColorToSelection() {
@@ -3714,6 +3703,8 @@ export function bootstrapApp() {
   });
 
   document.addEventListener("keydown", (event) => {
+    if (shouldIgnoreSceneHotkeys(event)) return;
+
     if (event.key === "Escape") {
       closeMousePlaceMenu();
       // Deselect current object
@@ -3735,38 +3726,6 @@ export function bootstrapApp() {
         renderObjectList();
       }
     }
-  });
-
-  transformSnapModeEl.addEventListener("change", refreshDebug);
-  navigationModeEl?.addEventListener("change", () => {
-    if (typeof world.setNavigationMode === "function") {
-      world.setNavigationMode(navigationModeEl.value || "blender");
-    }
-    setStatus(`Navigation: ${navigationModeEl.value}`, "ok");
-    refreshDebug();
-  });
-  bindValueEvents(rotationStepInputEl, refreshDebug);
-  snapToggleEl.addEventListener("change", refreshDebug);
-  bindValueEvents(gridStepInputEl, refreshDebug);
-
-  calibrateBtn.addEventListener("click", () => {
-    const reference = appState.interaction.wristToIndex || appState.calibration.baselineDistance;
-    appState.calibration.baselineDistance = reference;
-    appState.calibration.scaleK = deriveScaleK(reference);
-    saveCalibration(appState.calibration);
-    setStatus("Calibration captured", "ok");
-    refreshDebug();
-  });
-
-  calibrationPresetEl.addEventListener("change", () => {
-    const preset = calibrationPresets[calibrationPresetEl.value];
-    if (!preset) return;
-    appState.calibration = { ...appState.calibration, ...preset };
-    smoothingInputEl.value = String(appState.calibration.smoothingAlpha);
-    pipeline.setAlpha(appState.calibration.smoothingAlpha);
-    saveCalibration(appState.calibration);
-    setStatus(`Calibration preset: ${calibrationPresetEl.value}`, "ok");
-    refreshDebug();
   });
 
   undoBtn.addEventListener("click", undo);

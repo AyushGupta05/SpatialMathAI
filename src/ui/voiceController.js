@@ -9,6 +9,8 @@ let ttsSessionId = null;
 let ttsUnsubscribe = null;
 let ttsAudioPlayer = null;
 let pendingTtsResolve = null;
+let pendingTtsTimeoutId = null;
+let ttsAudioAppendChain = Promise.resolve();
 
 function ensureAudioPlayer() {
   if (!ttsAudioPlayer) {
@@ -17,24 +19,49 @@ function ensureAudioPlayer() {
   return ttsAudioPlayer;
 }
 
+function clearPendingTtsTimeout() {
+  if (!pendingTtsTimeoutId) return;
+  window.clearTimeout(pendingTtsTimeoutId);
+  pendingTtsTimeoutId = null;
+}
+
 function resolvePendingTts() {
+  clearPendingTtsTimeout();
   if (!pendingTtsResolve) return;
   pendingTtsResolve();
   pendingTtsResolve = null;
 }
 
+function settlePendingTtsAfterPlayback() {
+  const player = ttsAudioPlayer;
+  if (!player || !player.isPlaying()) {
+    resolvePendingTts();
+    return;
+  }
+  player.whenIdle().then(() => {
+    resolvePendingTts();
+  }).catch(() => {
+    resolvePendingTts();
+  });
+}
+
 function handleTtsEvent(event = {}) {
   if (event.type === "assistant_audio") {
-    ensureAudioPlayer()
+    ttsAudioAppendChain = ttsAudioAppendChain
+      .then(() => ensureAudioPlayer()
       .appendBase64Chunk(event.audioBase64, event.sampleRateHertz || 24000)
       .catch((error) => {
         console.warn("Sonic TTS audio playback failed:", error);
-      });
+      }));
     return;
   }
 
   if (event.type === "done" || event.type === "interrupted") {
-    resolvePendingTts();
+    ttsAudioAppendChain
+      .catch(() => {})
+      .finally(() => {
+        settlePendingTtsAfterPlayback();
+      });
   }
 }
 
@@ -82,19 +109,26 @@ function sonicAvailable() {
 async function startTextOnlyTurn(text) {
   const sessionId = await ensureTtsSession();
   ensureAudioPlayer().stop();
-  await startVoiceSessionTurn({
-    sessionId,
-    mode: "narrate",
-    text,
-    context: null,
-    playbackMode: "auto",
-    requires_evaluation: false,
-  });
-
-  await new Promise((resolve) => {
+  ttsAudioAppendChain = Promise.resolve();
+  const playbackDone = new Promise((resolve) => {
     pendingTtsResolve = resolve;
-    window.setTimeout(resolvePendingTts, 8000);
+    clearPendingTtsTimeout();
+    pendingTtsTimeoutId = window.setTimeout(resolvePendingTts, 8000);
   });
+  try {
+    await startVoiceSessionTurn({
+      sessionId,
+      mode: "narrate",
+      text,
+      context: null,
+      playbackMode: "auto",
+      requires_evaluation: false,
+    });
+    await playbackDone;
+  } catch (error) {
+    resolvePendingTts();
+    throw error;
+  }
 }
 
 export async function dispatchTTS(text) {

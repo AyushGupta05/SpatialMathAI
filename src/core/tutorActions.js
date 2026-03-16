@@ -50,6 +50,33 @@ function stageFormulaText(plan = {}, stage = null) {
   return challengeFormula || stageFormula || analyticFormula || scaffoldFormula || "";
 }
 
+function analyticSceneMoment(plan = {}, stage = null, learningState = {}) {
+  if (plan?.experienceMode !== "analytic_auto" || !Array.isArray(plan?.sceneMoments) || !plan.sceneMoments.length) {
+    return null;
+  }
+
+  const stageId = stage?.id || null;
+  if (stageId) {
+    const matchedMoment = plan.sceneMoments.find((moment) => moment.id === stageId);
+    if (matchedMoment) return matchedMoment;
+  }
+
+  const stepIndex = Number.isFinite(Number(learningState?.currentStep))
+    ? Math.max(0, Number(learningState.currentStep))
+    : 0;
+  return plan.sceneMoments[stepIndex] || plan.sceneMoments[0] || null;
+}
+
+function analyticActionFlags(plan = {}, stage = null, learningState = {}) {
+  const moment = analyticSceneMoment(plan, stage, learningState);
+  const revealFullSolution = Boolean(moment?.revealFullSolution);
+  return {
+    moment,
+    revealFormula: Boolean(moment?.revealFormula || revealFullSolution),
+    revealFullSolution,
+  };
+}
+
 function stageTypeForContext(plan = {}, stage = null, learningState = {}) {
   if (plan?.experienceMode === "analytic_auto") {
     return "ANALYTIC_AUTO";
@@ -75,6 +102,7 @@ export function deriveHintTypeFromLabel(label = "") {
   const normalized = String(label || "").trim();
   switch (normalized) {
     case "What should I focus on?":
+    case "What should I notice?":
       return "focus";
     case "How do I start?":
       return "entry";
@@ -128,6 +156,22 @@ function showHint(label, payload = {}) {
   });
 }
 
+function analyticInitialActions(plan = {}, stage = null, learningState = {}) {
+  const { revealFormula, revealFullSolution } = analyticActionFlags(plan, stage, learningState);
+  const actions = [
+    showHint(revealFormula || revealFullSolution ? "Give me a hint" : "What should I notice?"),
+  ];
+
+  if (revealFormula || revealFullSolution) {
+    actions.push(button("show_formula", "Show formula", "secondary"));
+  }
+  if (revealFullSolution) {
+    actions.push(button("view_solution", "Show solution", "danger-muted"));
+  }
+
+  return actions;
+}
+
 function initialActionsForStage(plan = {}, stage = null, learningState = {}) {
   const stageType = stageTypeForContext(plan, stage, learningState);
   const hasFormula = Boolean(stageFormulaText(plan, stage));
@@ -150,9 +194,7 @@ function initialActionsForStage(plan = {}, stage = null, learningState = {}) {
         ? [showHint("Give me a hint"), button("show_formula", "Show formula", "secondary")]
         : [showHint("Give me a hint")];
     case "ANALYTIC_AUTO":
-      return hasFormula
-        ? [showHint("Walk me through this"), button("show_formula", "Show formula", "secondary")]
-        : [showHint("Walk me through this")];
+      return analyticInitialActions(plan, stage, learningState);
     default:
       return [showHint("Give me a hint")];
   }
@@ -179,19 +221,30 @@ function actionsForStuck(plan = {}, stage = null, learningState = {}) {
   const hintState = normalizeHintState(learningState?.hint_state || {});
   const stageType = stageTypeForContext(plan, stage, learningState);
   const formulaAction = button("show_formula", "Show formula", "secondary");
+  const analyticFlags = analyticActionFlags(plan, stage, learningState);
 
   if (hintState.escalate_next || hintState.current_stage_hints >= hintState.max_hints) {
-    return [button("view_solution", "Show me the solution", "danger-muted")];
+    return [button("view_solution", "Show solution", "danger-muted")];
   }
 
   if (hintState.current_stage_hints === 1) {
-    if (["CHECK", "CHALLENGE", "ANALYTIC_AUTO"].includes(stageType) && stageFormulaText(plan, stage)) {
+    if (stageType === "ANALYTIC_AUTO") {
+      return analyticFlags.revealFormula
+        ? [showHint("Give me a hint"), formulaAction]
+        : [showHint("Give me a hint")];
+    }
+    if (["CHECK", "CHALLENGE"].includes(stageType) && stageFormulaText(plan, stage)) {
       return [showHint("Give me a hint"), formulaAction];
     }
     return [showHint("Give me a hint")];
   }
 
   if (hintState.current_stage_hints >= 2) {
+    if (stageType === "ANALYTIC_AUTO") {
+      return analyticFlags.revealFormula
+        ? [showHint("Another hint"), formulaAction]
+        : [showHint("Another hint")];
+    }
     return stageFormulaText(plan, stage)
       ? [showHint("Another hint"), formulaAction]
       : [showHint("Another hint")];
@@ -255,10 +308,14 @@ export function resolveTutorActionState({
 
   if (lastVerdict === "PARTIAL") {
     const gap = conceptVerdict?.gap || currentVerdictEntry(derivedLearningState)?.gap || null;
+    const actions = actionsForPartial(gap);
+    if (stageType === "ANALYTIC_AUTO" && analyticActionFlags(plan, stage, derivedLearningState).revealFormula) {
+      actions.push(button("show_formula", "Show formula", "secondary"));
+    }
     return {
       stageType,
       lastVerdict,
-      actions: actionsForPartial(gap),
+      actions,
     };
   }
 
