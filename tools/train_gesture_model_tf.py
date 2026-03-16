@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Train a TensorFlow gesture classifier for SpatialMath Nova hand signals.
+Train a TensorFlow gesture classifier for Spatial Math AI hand signals.
 
 Gesture classes/signals:
 - pinch_place        -> Pinch (thumb + index) = place object

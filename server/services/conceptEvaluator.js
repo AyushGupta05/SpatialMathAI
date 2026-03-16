@@ -460,7 +460,7 @@ function normalizeVerdict(parsed = {}) {
 
   if (verdict === "CORRECT" && confidence < 0.75) {
     verdict = "PARTIAL";
-    gap = "SpatialMath was uncertain - checking understanding";
+    gap = "Spatial Math AI was uncertain - checking understanding";
     scene_cue = null;
     console.log(`[eval] CORRECT→PARTIAL override, confidence=${confidence}`);
   }

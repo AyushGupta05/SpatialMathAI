@@ -1,6 +1,6 @@
-# SpatialMath Nova
+# Spatial Math AI
 
-SpatialMath Nova is an AI-powered spatial reasoning tutor that turns maths and physics problems into interactive 3D scenes students can explore. Learners can enter a question, upload a worksheet image, or paste a screenshot, and the system generates a visual scene that helps them understand vectors, planes, geometry, and other spatial concepts more intuitively. It combines adaptive tutoring, voice interaction, and gesture-based manipulation so students can see the structure of a problem instead of trying to imagine it from a flat diagram.
+Spatial Math AI is an AI-powered spatial reasoning tutor that turns maths and physics problems into interactive 3D scenes students can explore. Learners can enter a question, upload a worksheet image, or paste a screenshot, and the system generates a visual scene that helps them understand vectors, planes, geometry, and other spatial concepts more intuitively. It combines adaptive tutoring, voice interaction, and gesture-based manipulation so students can see the structure of a problem instead of trying to imagine it from a flat diagram.
 
 ## Local setup
 

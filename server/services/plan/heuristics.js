@@ -158,7 +158,7 @@ function buildCustomAnalyticFallbackPlan(question, questionType, mode = "guided"
     id: DEFAULT_BOARD_ID,
     label: "Lesson board",
     title: "Lesson board",
-    purpose: "Use the board to keep the prompt, method, and checks visible while SpatialMath guides the learner.",
+    purpose: "Use the board to keep the prompt, method, and checks visible while Spatial Math AI guides the learner.",
     width: 11,
     height: 8,
     color: "#20324d",
@@ -336,9 +336,9 @@ function buildCustomAnalyticFallbackPlan(question, questionType, mode = "guided"
       },
       challenge: {
         title: "Ask More",
-        coachMessage: "Ask SpatialMath to unpack any step, method choice, or check on the board.",
+        coachMessage: "Ask Spatial Math AI to unpack any step, method choice, or check on the board.",
         goal: "Keep the follow-up tied to the visible prompt and method notes.",
-        prompt: "Which part of the method should SpatialMath explain next?",
+        prompt: "Which part of the method should Spatial Math AI explain next?",
         insight: "",
         whyItMatters: "Follow-up questions stay grounded in the same problem.",
       },
@@ -720,7 +720,7 @@ function inferSceneFocus(question, shape, questionType, sourceSummary, helperSug
     concept: sourceSummary.diagramSummary ? "spatial relationship" : `${shape} structure`,
     primaryInsight: "Use the scene to make the important spatial relationship visible.",
     focusPrompt: "Focus on the one relationship that would be hardest to see on paper.",
-    judgeSummary: "The student acts on a scene and SpatialMath responds to that specific action.",
+    judgeSummary: "The student acts on a scene and Spatial Math AI responds to that specific action.",
   };
 }
 
@@ -934,7 +934,7 @@ export function heuristicPlan(question, mode = "guided", sourceSummary = null) {
         : `Build the ${primaryShape === "pointMarker" ? "reference point" : primaryShape} and the key helpers, then reason from the scene.`,
       mode,
     },
-    overview: "SpatialMath turned the question into a guided, editable lesson scene. Build or inspect the scene, make a prediction, then check it in 3D.",
+    overview: "Spatial Math AI turned the question into a guided, editable lesson scene. Build or inspect the scene, make a prediction, then check it in 3D.",
     sourceSummary: effectiveSourceSummary,
     sceneFocus,
     learningMoments: buildLearningMoments({

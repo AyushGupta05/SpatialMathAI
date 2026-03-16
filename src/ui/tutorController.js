@@ -50,7 +50,7 @@ let cameraDirector = null;
 let assessmentTimer = null;
 let questionImageFile = null;
 let questionImagePreviewUrl = null;
-let lastSceneFeedback = "SpatialMath will react to what you do in the scene.";
+let lastSceneFeedback = "Spatial Math AI will react to what you do in the scene.";
 let voiceConversationId = null;
 let activeMicCapture = null;
 let voiceModeTogglePromise = null;
@@ -480,7 +480,7 @@ function localVoicePlaybackActive() {
 
 function showVoicePlaybackStatus() {
   updateVoiceVisualState("responding");
-  updateVoiceStatus("SpatialMath is responding...", "ready");
+  updateVoiceStatus("Spatial Math AI is responding...", "ready");
 }
 
 function queueVoicePlaybackRelease() {
@@ -827,7 +827,7 @@ function buildSystemContextMessage(plan = activePlan()) {
   const givens = evidence.givens?.length ? ` Givens: ${evidence.givens.join(", ")}.` : "";
   const conflicts = evidence.conflicts?.length ? ` Check this mismatch: ${evidence.conflicts.join(" ")}` : "";
   const analytic = isAnalyticPlan(plan)
-    ? ` SpatialMath auto-drew the scene for ${plan.analyticContext?.subtype?.replaceAll("_", " ") || "analytic geometry"}.`
+    ? ` Spatial Math AI auto-drew the scene for ${plan.analyticContext?.subtype?.replaceAll("_", " ") || "analytic geometry"}.`
     : "";
   return `${source}${givens}${conflicts}${analytic}`.trim();
 }
@@ -1518,12 +1518,12 @@ function renderSceneInfo() {
           <span class="formula">V = ${formatNumber(selected.metrics.volume)}, SA = ${formatNumber(selected.metrics.surfaceArea)}</span>
         </p>
       `
-      : `<p class="muted-text" style="margin:8px 0 0">Select an object, or ask SpatialMath to explain or remix the scene.</p>`;
+      : `<p class="muted-text" style="margin:8px 0 0">Select an object, or ask Spatial Math AI to explain or remix the scene.</p>`;
 
     sceneInfo.innerHTML = `
       <p style="margin:0 0 6px"><strong>Freeform scene</strong></p>
       <p class="muted-text">${count} object${count === 1 ? "" : "s"} currently in the world</p>
-      <p class="muted-text">SpatialMath can read this scene, talk about it, and edit it if you ask.</p>
+      <p class="muted-text">Spatial Math AI can read this scene, talk about it, and edit it if you ask.</p>
       ${freeformSelectionMarkup}
     `;
     return;
@@ -1575,7 +1575,7 @@ function renderAssessment(assessment) {
 
   if (!assessment) {
     if (!activePlan()) {
-      sceneValidation.innerHTML = `<p class="muted-text">SpatialMath can chat about anything, inspect the current scene, and build a fresh math visual when you ask.</p>`;
+      sceneValidation.innerHTML = `<p class="muted-text">Spatial Math AI can chat about anything, inspect the current scene, and build a fresh math visual when you ask.</p>`;
       return;
     }
     sceneValidation.innerHTML = `<p class="muted-text">The tutor will inspect the scene and highlight the next useful idea.</p>`;
@@ -1915,7 +1915,7 @@ function setPlan(plan, options = {}) {
   tutorState.setPlan(normalizedPlan, { mode: options.mode || normalizedPlan.problem?.mode || "guided" });
   tutorState.setPhase(isAnalyticPlan(normalizedPlan) ? "guided_build" : "plan_ready");
   tutorState.setLearningStage(isAnalyticPlan(normalizedPlan) ? "build" : "orient");
-  lastSceneFeedback = normalizedPlan.sceneFocus?.primaryInsight || "SpatialMath will react to what you do in the scene.";
+  lastSceneFeedback = normalizedPlan.sceneFocus?.primaryInsight || "Spatial Math AI will react to what you do in the scene.";
 
   clearTranscript();
   setCheckpointState(null);
@@ -2574,11 +2574,11 @@ function setVoiceStatusForState(state = voiceSessionState) {
     return;
   }
   if (state === "processing") {
-    updateVoiceStatus(lastVoiceTranscript ? `SpatialMath heard: ${lastVoiceTranscript}` : "Processing...", "ready");
+    updateVoiceStatus(lastVoiceTranscript ? `Spatial Math AI heard: ${lastVoiceTranscript}` : "Processing...", "ready");
     return;
   }
   if (state === "responding") {
-    updateVoiceStatus("SpatialMath is responding...", "ready");
+    updateVoiceStatus("Spatial Math AI is responding...", "ready");
     return;
   }
   updateVoiceStatus(standbyVoiceStatus(), voiceModeEnabled ? "ready" : "hidden");
@@ -2637,7 +2637,7 @@ function handleVoiceSessionEvent(event = {}) {
       if (event.inputTranscript) {
         setVoiceTranscript(event.inputTranscript);
       }
-      setVoiceAssistantMessage(event.assistantText || "SpatialMath did not return a voice reply.", {
+      setVoiceAssistantMessage(event.assistantText || "Spatial Math AI did not return a voice reply.", {
         final: true,
       });
       voiceConversationId = event.conversationId || voiceConversationId;

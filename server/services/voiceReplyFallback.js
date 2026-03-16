@@ -15,7 +15,7 @@ import {
   DEFAULT_VOICE_ID,
 } from "./voiceCommon.js";
 
-const GENERIC_VOICE_REPLY_SYSTEM_PROMPT = `You are SpatialMath, a spoken spatial-maths tutor.
+const GENERIC_VOICE_REPLY_SYSTEM_PROMPT = `You are Spatial Math AI, a spoken spatial-maths tutor.
 - Reply conversationally in a few short spoken sentences when needed.
 - Be warm, concrete, and easy to follow.
 - Answer the user's question directly and completely when you can.

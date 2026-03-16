@@ -613,7 +613,7 @@ function buildAnalyticContext(plan, sourceSteps = []) {
       stagedMomentCount: sourceSteps.length,
     },
     formulaCard: {
-      title: plan.sceneFocus?.concept || "SpatialMath-guided formula walkthrough",
+      title: plan.sceneFocus?.concept || "Spatial Math AI-guided formula walkthrough",
       formula: plan.answerScaffold?.formula || "",
       explanation: plan.answerScaffold?.explanation || plan.overview || "Use the staged scene to connect the visible structure to the calculation.",
     },

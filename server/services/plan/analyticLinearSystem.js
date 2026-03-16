@@ -526,7 +526,7 @@ function commonLearningMoments(sceneMoments = [], category = SYSTEM_CATEGORY, in
       title: "Ask More",
       coachMessage: "Ask about any equation, row relation, or consistency step.",
       goal: "Keep the explanation tied to the visible equations.",
-      prompt: "Which part of the system should SpatialMath unpack next?",
+      prompt: "Which part of the system should Spatial Math AI unpack next?",
       insight: "",
       whyItMatters: "Follow-up questions stay anchored to the system on the board.",
     },

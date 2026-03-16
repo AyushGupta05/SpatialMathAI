@@ -166,7 +166,7 @@ function breakdownForObject(objectSpec) {
     case "sphere":
       return [
         "A sphere cannot be flattened into a true net without distortion.",
-        `SpatialMath still computes its surface area with 4pi r^2 = ${formatNumber(metrics.surfaceArea)}.`,
+        `Spatial Math AI still computes its surface area with 4pi r^2 = ${formatNumber(metrics.surfaceArea)}.`,
       ];
     default:
       return ["Unfold view is designed for solids and surface-area reasoning."];
@@ -315,7 +315,7 @@ function renderNet(objectSpec) {
     case "pyramid":
       return pyramidNetSvg(params.base, params.height);
     case "sphere":
-      return `${sphereFallbackSvg(params.radius)}<p class="unfold-net-note">A sphere has no true flat net, so SpatialMath shows a conceptual surface-area view instead.</p>`;
+      return `${sphereFallbackSvg(params.radius)}<p class="unfold-net-note">A sphere has no true flat net, so Spatial Math AI shows a conceptual surface-area view instead.</p>`;
     default:
       return `<p class="unfold-net-note">This object does not have a supported unfold view yet.</p>`;
   }
@@ -354,7 +354,7 @@ function defaultSubtitle(objectSpec, mode = "manual") {
   }
   return objectSpec.shape === "sphere"
     ? "Surface area stays available even though a sphere cannot unfold into a true flat net."
-    : `Inspect how SpatialMath breaks the ${shapeTitle(objectSpec.shape).toLowerCase()}'s surface into 2D parts.`;
+    : `Inspect how Spatial Math AI breaks the ${shapeTitle(objectSpec.shape).toLowerCase()}'s surface into 2D parts.`;
 }
 
 function renderObject(objectSpec, options = {}) {
@@ -379,7 +379,7 @@ function renderEmptyCompanion(options = {}) {
   subtitleEl.textContent = options.subtitle || "A flat companion will appear when a supported solid is visible.";
   statsEl.innerHTML = "";
   formulaEl.textContent = "Add a cube, cuboid, cylinder, cone, pyramid, or sphere to unlock the companion view.";
-  breakdownEl.innerHTML = `<div class="unfold-breakdown-item">${escapeHtml(options.message || "SpatialMath uses the 2D companion for surface-area and net reasoning.")}</div>`;
+  breakdownEl.innerHTML = `<div class="unfold-breakdown-item">${escapeHtml(options.message || "Spatial Math AI uses the 2D companion for surface-area and net reasoning.")}</div>`;
   netEl.innerHTML = `<p class="unfold-net-note">No supported solid is visible yet.</p>`;
 }
 

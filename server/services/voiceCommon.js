@@ -68,7 +68,7 @@ export function pcmToWavBuffer(pcmBuffer, sampleRate = OUTPUT_SAMPLE_RATE, chann
 }
 
 export function buildNarrationPrompt() {
-  return `You are SpatialMath, narrating in the style of 3Blue1Brown.
+  return `You are Spatial Math AI, narrating in the style of 3Blue1Brown.
 
 Read the provided text aloud with these qualities:
 - Warm, curious, and unhurried. Like thinking alongside a friend.
@@ -80,7 +80,7 @@ Read the provided text aloud with these qualities:
 
 export function buildVoiceCoachPrompt(context = {}, session) {
   if (!context?.plan || !context?.sceneSnapshot) {
-    return `You are SpatialMath, a spoken spatial-maths tutor in the style of 3Blue1Brown.
+    return `You are Spatial Math AI, a spoken spatial-maths tutor in the style of 3Blue1Brown.
 - Speak warmly and curiously, like you're exploring an idea together.
 - Answer the user's question directly and completely before adding guidance.
 - Use as many short spoken sentences as needed to finish one coherent thought, usually 2-5.
@@ -125,7 +125,7 @@ export function buildVoiceFallback({ text, context, userMessage }) {
       contextStepId: context.contextStepId || null,
     });
   }
-  return String(text || "SpatialMath voice is unavailable right now. Try a typed follow-up.");
+  return String(text || "Spatial Math AI voice is unavailable right now. Try a typed follow-up.");
 }
 
 function outputConfiguration(playbackMode, voiceId) {

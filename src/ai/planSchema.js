@@ -373,7 +373,7 @@ function normalizeAgentTrace(items = []) {
 
 function normalizeDemoPreset(preset = {}, sceneFocus = {}, sourceSummary = {}) {
   return {
-    title: normalizeString(preset.title, sourceSummary.cleanedQuestion || sceneFocus.concept || "SpatialMath demo"),
+    title: normalizeString(preset.title, sourceSummary.cleanedQuestion || sceneFocus.concept || "Spatial Math AI demo"),
     scriptBeat: normalizeString(
       preset.scriptBeat,
       sceneFocus.judgeSummary || sceneFocus.primaryInsight || "Turn the worksheet into a live 3D lesson and coach the learner through it."
@@ -395,7 +395,7 @@ function normalizeSceneFocus(sceneFocus = {}, question = "") {
     focusPrompt: normalizeString(sceneFocus.focusPrompt, primaryInsight),
     judgeSummary: normalizeString(
       sceneFocus.judgeSummary,
-      "The student acts on the scene, and SpatialMath responds to that action."
+      "The student acts on the scene, and Spatial Math AI responds to that action."
     ),
   };
 }

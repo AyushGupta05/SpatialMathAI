@@ -150,7 +150,7 @@ export function buildStageConfig({
     headline: learningMoment.title || "Lesson",
     message: learningMoment.coachMessage || plan?.sceneFocus?.primaryInsight || "Use the scene to reason step by step.",
     goal: learningMoment.goal || plan?.sceneFocus?.focusPrompt || "Use the scene to focus on the main idea.",
-    feedback: lastSceneFeedback || guidance.coachFeedback || "SpatialMath is waiting for your next action.",
+    feedback: lastSceneFeedback || guidance.coachFeedback || "Spatial Math AI is waiting for your next action.",
     why: learningMoment.whyItMatters || plan?.sceneFocus?.primaryInsight || "",
     advanceLabel: "Continue",
     showPrediction: false,

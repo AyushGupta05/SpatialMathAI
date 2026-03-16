@@ -122,7 +122,7 @@ function insertDemoOverlay() {
     <div style="font-weight:500;margin-bottom:8px">Demo beats</div>
     <div class="beat" id="demo-beat-1">
       <span class="beat-dot"></span>
-      SpatialMath reads the diagram
+      Spatial Math AI reads the diagram
     </div>
     <div class="beat" id="demo-beat-2">
       <span class="beat-dot"></span>
