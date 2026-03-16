@@ -561,6 +561,10 @@ function buildHelperSuggestions(primaryObject, question, questionType) {
   const { shape, params, position } = primaryObject;
   const lower = question.toLowerCase();
 
+  if (questionType === "surface_area" || questionType === "volume") {
+    return helpers;
+  }
+
   if (["cylinder", "cone", "sphere"].includes(shape)) {
     const radius = params.radius || 0.5;
     helpers.push(buildLineSuggestion({

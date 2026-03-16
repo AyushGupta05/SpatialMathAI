@@ -6,7 +6,7 @@ function primaryShape(plan = {}) {
   return plan?.objectSuggestions?.[0]?.object?.shape || "";
 }
 
-function shouldPreferBaselineMetricScaffold(baselinePlan = {}, novaPlan = {}) {
+function shouldPreferBaselineMetricScaffold(baselinePlan = {}) {
   const questionType = baselinePlan?.problem?.questionType || "";
   if (!["surface_area", "volume"].includes(questionType)) {
     return false;
@@ -16,8 +16,7 @@ function shouldPreferBaselineMetricScaffold(baselinePlan = {}, novaPlan = {}) {
     return false;
   }
 
-  const inputMode = novaPlan?.sourceSummary?.inputMode || baselinePlan?.sourceSummary?.inputMode || "";
-  return inputMode === "image" || inputMode === "multimodal";
+  return true;
 }
 
 export function mergeGeneratedPlan({ baselinePlan, novaPlan, workingQuestion, mode }) {
@@ -44,7 +43,7 @@ export function mergeGeneratedPlan({ baselinePlan, novaPlan, workingQuestion, mo
   const preferNovaScaffold = !preserveAnalytic && novaPlan?.experienceMode === "analytic_auto";
   const preferBaselineMetricScaffold = !preserveAnalytic
     && !preferNovaScaffold
-    && shouldPreferBaselineMetricScaffold(baselinePlan, novaPlan);
+    && shouldPreferBaselineMetricScaffold(baselinePlan);
   return normalizeScenePlan({
     ...baselinePlan,
     ...novaPlan,

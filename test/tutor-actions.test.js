@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { resolveHintFollowUpActionState } from "../src/core/tutorActions.js";
+import { resolveHintFollowUpActionState, resolveTutorActionState } from "../src/core/tutorActions.js";
 import { TutorState } from "../src/state/tutorState.js";
 
 test("resolveHintFollowUpActionState escalates hint prompts across repeated help requests", () => {
@@ -56,4 +56,28 @@ test("TutorState.useHint marks the solution path once the max hint count is reac
   assert.equal(state.hint_state.escalate_next, false);
   assert.equal(state.useHint(), true);
   assert.equal(state.hint_state.escalate_next, true);
+});
+
+test("resolveTutorActionState uses verdict-driven actions for non-evaluated turns", () => {
+  const actionState = resolveTutorActionState({
+    plan: {},
+    stage: { id: "stage-1", learningStage: "orient" },
+    learningState: {
+      learningStage: "orient",
+      learnerHistory: [{
+        stage: "orient",
+        verdict: "STUCK",
+        gap: "Missed the key visual cue",
+      }],
+      hint_state: {
+        current_stage_hints: 1,
+        max_hints: 3,
+        escalate_next: false,
+      },
+    },
+    responseKind: "non_evaluated",
+  });
+
+  assert.equal(actionState.lastVerdict, "STUCK");
+  assert.equal(actionState.actions[0].label, "Give me a hint");
 });

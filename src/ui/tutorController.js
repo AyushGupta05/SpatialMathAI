@@ -2062,7 +2062,7 @@ function beginManualBuild() {
 }
 
 function syncStepFromTutorResponse(response = {}, plan = activePlan()) {
-  const stageId = response.stageStatus?.currentStageId || null;
+  const stageId = response.assessment?.nextStage?.id || response.stageStatus?.currentStageId || null;
   if (!plan?.lessonStages?.length || !stageId) return;
   const stageIndex = plan.lessonStages.findIndex((stage) => stage.id === stageId);
   if (stageIndex >= 0) {
@@ -3348,6 +3348,5 @@ export function updateTutorLabels() {
   electricFieldManager?.update();
   syncUnfoldDrawer();
 }
-
 
 

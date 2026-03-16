@@ -27,8 +27,9 @@ test("heuristicPlan builds a normalized volume lesson scaffold", () => {
   assert.equal(plan.problem.mode, "guided");
   assert.equal(plan.answerScaffold.formula, "V = pi r^2 h");
   assert.equal(plan.objectSuggestions[0].id, "primary-object");
-  assert.ok(plan.objectSuggestions.some((item) => item.id === "radius-helper"));
-  assert.ok(plan.objectSuggestions.some((item) => item.id === "height-helper"));
+  assert.equal(plan.objectSuggestions.length, 1);
+  assert.equal(plan.objectSuggestions[0].object.shape, "cylinder");
+  assert.equal(plan.buildSteps[1]?.action, "observe");
   assert.equal(plan.buildSteps.length, 3);
   assert.equal(plan.liveChallenge?.metric, "volume");
 });
@@ -111,10 +112,10 @@ test("mergeGeneratedPlan preserves merge precedence from baseline and nova plans
   assert.equal(merged.problem.mode, "guided");
   assert.equal(merged.overview, "Nova overview");
   assert.equal(merged.objectSuggestions.length, baseline.objectSuggestions.length);
-  assert.equal(merged.buildSteps.length, baseline.buildSteps.length + 1);
-  assert.equal(merged.cameraBookmarks[0].id, "nova-camera");
+  assert.equal(merged.buildSteps.length, baseline.buildSteps.length);
+  assert.equal(merged.cameraBookmarks[0].id, baseline.cameraBookmarks[0].id);
   assert.equal(merged.answerScaffold.formula, "Nova formula");
-  assert.equal(merged.challengePrompts[0].id, "nova-challenge");
+  assert.equal(merged.challengePrompts[0].id, baseline.challengePrompts[0].id);
   assert.equal(merged.liveChallenge?.id, "nova-live");
 });
 

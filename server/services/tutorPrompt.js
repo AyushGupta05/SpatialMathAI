@@ -441,7 +441,7 @@ The learner demonstrated correct understanding.
 What they understood: ${verdict.what_was_right}
 
 Response rules for this turn:
-- Tone: warm but not over-the-top. Do NOT say "Great job!" or "Excellent!"
+- Tone: warm but not over-the-top. You MAY use a brief positive acknowledgment (for example "Great.", "Excellent.", "Perfect.", "Good.") exactly once near the start.
 - Reference what they specifically said that was right.
 - Bridge naturally to the next stage concept. Max 2 sentences before the bridge.
 - End with a question that opens the next concept.`;

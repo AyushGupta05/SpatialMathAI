@@ -320,9 +320,21 @@ function parseSsePayloads(bodyText) {
     .map((line) => JSON.parse(line.slice(6)));
 }
 
+function createTestTutorRoute(overrides = {}) {
+  return createTutorRoute({
+    progressionEvaluator: async () => ({
+      shouldProgress: false,
+      layer1Matched: false,
+      layer2Decision: "NO",
+      reason: "test default",
+    }),
+    ...overrides,
+  });
+}
+
 test("POST /api/tutor streams lesson metadata before tutor text", async () => {
   const plan = buildPlan();
-  const tutorRoute = createTutorRoute({
+  const tutorRoute = createTestTutorRoute({
     streamModel: async function* streamTutor() {
       yield "Let's ";
       yield "start.";
@@ -351,7 +363,7 @@ test("POST /api/tutor streams lesson metadata before tutor text", async () => {
   assert.equal(meta.stageStatus.currentStageId, "step-1");
   assert.equal(meta.stageStatus.canAdvance, false);
   assert.deepEqual(meta.actions.map((action) => action.id), ["show_hint"]);
-  assert.equal(meta.actions[0].label, "What should I focus on?");
+  assert.equal(meta.actions[0].label, "What should I notice?");
   assert.deepEqual(meta.focusTargets, ["primary-cylinder"]);
   assert.match(meta.systemContextMessage, /Givens: radius = 3, height = 7\./);
   assert.equal(text, "Let's start.");
@@ -360,7 +372,7 @@ test("POST /api/tutor streams lesson metadata before tutor text", async () => {
 
 test("POST /api/tutor includes deterministic completion metadata for correct answers", async () => {
   const plan = buildPlan();
-  const tutorRoute = createTutorRoute({
+  const tutorRoute = createTestTutorRoute({
     streamModel: async function* streamTutor() {
       yield "Correct.";
     },
@@ -382,16 +394,13 @@ test("POST /api/tutor includes deterministic completion metadata for correct ans
   const meta = payloads.find((entry) => entry.type === "meta")?.content;
 
   assert.deepEqual(meta?.completionState, { complete: true, reason: "correct-answer" });
-  assert.deepEqual(meta?.checkpoint, {
-    prompt: "Does this look correct?",
-    options: ["yes", "not_sure"],
-  });
+  assert.equal(meta?.checkpoint, null);
   assert.equal(meta?.stageStatus?.canAdvance, false);
 });
 
 test("POST /api/tutor keeps analytic opening actions hint-first before formula reveal", async () => {
   const plan = buildAnalyticPlan();
-  const tutorRoute = createTutorRoute({
+  const tutorRoute = createTestTutorRoute({
     streamModel: async function* streamTutor() {
       yield "Rotate ";
       yield "the scene.";
@@ -424,7 +433,7 @@ test("POST /api/tutor keeps analytic opening actions hint-first before formula r
 
 test("POST /api/tutor unlocks analytic formula actions when the current moment reveals them", async () => {
   const plan = buildAnalyticPlan({ revealFormula: true });
-  const tutorRoute = createTutorRoute({
+  const tutorRoute = createTestTutorRoute({
     streamModel: async function* streamTutor() {
       yield "Rotate ";
       yield "the scene.";
@@ -452,7 +461,7 @@ test("POST /api/tutor unlocks analytic formula actions when the current moment r
 
 test("POST /api/tutor advances analytic scene directives to the next moment after a correct answer", async () => {
   const plan = buildAnalyticProgressPlan();
-  const tutorRoute = createTutorRoute({
+  const tutorRoute = createTestTutorRoute({
     streamModel: async function* streamTutor() {
       yield "You found AB.";
     },
@@ -464,6 +473,12 @@ test("POST /api/tutor advances analytic scene directives to the next moment afte
       misconception_type: null,
       scene_cue: null,
       tutor_tone: "encouraging",
+    }),
+    progressionEvaluator: async () => ({
+      shouldProgress: true,
+      layer1Matched: true,
+      layer2Decision: "YES",
+      reason: "learner is ready",
     }),
   });
 
@@ -480,18 +495,21 @@ test("POST /api/tutor advances analytic scene directives to the next moment afte
   });
 
   const payloads = parseSsePayloads(await response.text());
-  const meta = payloads.find((entry) => entry.type === "meta")?.content;
+  const meta = payloads.filter((entry) => entry.type === "meta").at(-1)?.content;
+  const assessment = payloads.find((entry) => entry.type === "assessment")?.content;
 
   assert.equal(meta?.stageStatus?.currentStageId, "show-ab");
   assert.equal(meta?.sceneDirective?.stageId, "show-ab");
   assert.deepEqual(meta?.sceneDirective?.visibleObjectIds, ["point-a", "point-b", "point-c", "vector-ab"]);
   assert.deepEqual(meta?.focusTargets, ["vector-ab-object"]);
+  assert.equal(assessment?.nextStage?.id, "show-ab");
+  assert.equal(assessment?.nextLearningStage, "build");
 });
 
 test("POST /api/tutor evaluates short analytic vector replies instead of treating them as trivial", async () => {
   const plan = buildAnalyticProgressPlan();
   let conceptEvalCalled = false;
-  const tutorRoute = createTutorRoute({
+  const tutorRoute = createTestTutorRoute({
     streamModel: async function* streamTutor() {
       yield "Now ";
       yield "look at AB.";
@@ -508,6 +526,12 @@ test("POST /api/tutor evaluates short analytic vector replies instead of treatin
         tutor_tone: "encouraging",
       };
     },
+    progressionEvaluator: async () => ({
+      shouldProgress: true,
+      layer1Matched: true,
+      layer2Decision: "YES",
+      reason: "learner is ready",
+    }),
   });
 
   const response = await tutorRoute.request("/", {
@@ -530,7 +554,7 @@ test("POST /api/tutor evaluates short analytic vector replies instead of treatin
   });
 
   const payloads = parseSsePayloads(await response.text());
-  const meta = payloads.find((entry) => entry.type === "meta")?.content;
+  const meta = payloads.filter((entry) => entry.type === "meta").at(-1)?.content;
 
   assert.equal(conceptEvalCalled, true);
   assert.equal(meta?.stageStatus?.currentStageId, "show-ab");
@@ -538,9 +562,54 @@ test("POST /api/tutor evaluates short analytic vector replies instead of treatin
   assert.deepEqual(meta?.sceneDirective?.visibleObjectIds, ["point-a", "point-b", "point-c", "vector-ab"]);
 });
 
+test("POST /api/tutor keeps the current stage when progression gate returns NO", async () => {
+  const plan = buildAnalyticProgressPlan();
+  const tutorRoute = createTestTutorRoute({
+    streamModel: async function* streamTutor() {
+      yield "Great work on AB.";
+    },
+    conceptEvaluator: async () => ({
+      verdict: "CORRECT",
+      confidence: 0.98,
+      what_was_right: "Computed AB correctly",
+      gap: null,
+      misconception_type: null,
+      scene_cue: null,
+      tutor_tone: "encouraging",
+    }),
+    progressionEvaluator: async () => ({
+      shouldProgress: false,
+      layer1Matched: true,
+      layer2Decision: "NO",
+      reason: "Still needs one more check.",
+    }),
+  });
+
+  const response = await tutorRoute.request("/", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      plan,
+      sceneSnapshot: { objects: [], selectedObjectId: null },
+      learningState: { currentStep: 0, learningStage: "build", history: [] },
+      userMessage: "AB = (4, 0, 0)",
+      contextStepId: "plot-points",
+    }),
+  });
+
+  const payloads = parseSsePayloads(await response.text());
+  const meta = payloads.filter((entry) => entry.type === "meta").at(-1)?.content;
+  const assessment = payloads.find((entry) => entry.type === "assessment")?.content;
+
+  assert.equal(meta?.stageStatus?.currentStageId, "plot-points");
+  assert.equal(meta?.stageProgress?.shouldProgress, false);
+  assert.equal(assessment?.nextStage?.id, "plot-points");
+  assert.equal(assessment?.stageProgress?.layer2Decision, "NO");
+});
+
 test("POST /api/tutor exposes the solution action on analytic final reveal stages", async () => {
   const plan = buildAnalyticPlan({ revealFormula: true, revealFullSolution: true });
-  const tutorRoute = createTutorRoute({
+  const tutorRoute = createTestTutorRoute({
     streamModel: async function* streamTutor() {
       yield "Rotate ";
       yield "the scene.";
@@ -568,7 +637,7 @@ test("POST /api/tutor exposes the solution action on analytic final reveal stage
 
 test("POST /api/tutor escalates stuck analytic learners to the solution action only", async () => {
   const plan = buildAnalyticPlan({ revealFormula: true, revealFullSolution: true });
-  const tutorRoute = createTutorRoute({
+  const tutorRoute = createTestTutorRoute({
     streamModel: async function* streamTutor() {
       yield "Let's look again.";
     },
@@ -614,7 +683,7 @@ test("POST /api/tutor escalates stuck analytic learners to the solution action o
 
 test("POST /api/tutor reveals the worked solution deterministically when asked directly", async () => {
   const plan = buildAnalyticPlan();
-  const tutorRoute = createTutorRoute({
+  const tutorRoute = createTestTutorRoute({
     streamModel: async function* streamTutor() {
       yield "This should not run.";
     },
@@ -648,7 +717,7 @@ test("POST /api/tutor reveals the worked solution deterministically when asked d
 test("POST /api/tutor runs concept evaluation for non-trivial stages", async () => {
   const plan = buildPlan();
   let conceptEvalCalled = false;
-  const tutorRoute = createTutorRoute({
+  const tutorRoute = createTestTutorRoute({
     streamModel: async function* streamTutor() {
       yield "Good insight.";
     },
@@ -689,7 +758,7 @@ test("POST /api/tutor runs concept evaluation for non-trivial stages", async () 
 test("POST /api/tutor skips concept evaluation for trivial orient stage", async () => {
   const plan = buildPlan();
   let conceptEvalCalled = false;
-  const tutorRoute = createTutorRoute({
+  const tutorRoute = createTestTutorRoute({
     streamModel: async function* streamTutor() {
       yield "Welcome.";
     },
@@ -721,7 +790,7 @@ test("POST /api/tutor skips concept evaluation for trivial orient stage", async 
 test("POST /api/tutor bypasses concept evaluation when numeric answer matches", async () => {
   const plan = buildPlan();
   let conceptEvalCalled = false;
-  const tutorRoute = createTutorRoute({
+  const tutorRoute = createTestTutorRoute({
     streamModel: async function* streamTutor() {
       yield "Correct!";
     },
@@ -752,7 +821,7 @@ test("POST /api/tutor bypasses concept evaluation when numeric answer matches", 
 });
 
 test("POST /api/tutor supports freeform scene chat without a lesson plan", async () => {
-  const tutorRoute = createTutorRoute();
+  const tutorRoute = createTestTutorRoute();
 
   const response = await tutorRoute.request("/", {
     method: "POST",
@@ -779,7 +848,7 @@ test("POST /api/tutor supports freeform scene chat without a lesson plan", async
 });
 
 test("POST /api/tutor freeform requests fall back safely when the freeform generator throws", async () => {
-  const tutorRoute = createTutorRoute({
+  const tutorRoute = createTestTutorRoute({
     freeformTurnGenerator: async () => {
       throw new Error("boom");
     },
@@ -806,7 +875,7 @@ test("POST /api/tutor freeform requests fall back safely when the freeform gener
 });
 
 test("POST /api/tutor/similar returns similar question suggestions", async () => {
-  const tutorRoute = createTutorRoute({
+  const tutorRoute = createTestTutorRoute({
     similarQuestionGenerator: async () => ([
       { label: "One", prompt: "Question one", source: "template" },
       { label: "Two", prompt: "Question two", source: "template" },

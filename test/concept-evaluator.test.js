@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { evaluateConcept, isTrivialInteraction } from "../server/services/conceptEvaluator.js";
+import {
+  evaluateConcept,
+  evaluateStageProgression,
+  hasPositiveTutorSignal,
+  isTrivialInteraction,
+} from "../server/services/conceptEvaluator.js";
 
 test("isTrivialInteraction returns true for orient stage", () => {
   assert.equal(isTrivialInteraction("orient", "ok"), true);
@@ -190,4 +195,157 @@ test("evaluateConcept strips markdown code fences from response", async () => {
 
   assert.equal(result.verdict, "CORRECT");
   assert.equal(result.what_was_right, "Good answer");
+});
+
+test("evaluateConcept deterministically flags vector component mistakes", async () => {
+  const result = await evaluateConcept({
+    stageGoal: "Use AB and AC to set up the angle formula.",
+    learnerInput: "AB=(3,-3,4) and AC=(1,3,3)",
+    lessonContext: {
+      plan: {
+        analyticContext: {
+          entities: {
+            points: [
+              { label: "A", coordinates: [1, 2, -1] },
+              { label: "B", coordinates: [4, -1, 3] },
+              { label: "C", coordinates: [0, 5, 2] },
+            ],
+            lines: [
+              { label: "AB", direction: [3, -3, 4] },
+              { label: "AC", direction: [-1, 3, 3] },
+            ],
+          },
+        },
+      },
+    },
+    prediction: "",
+    learnerHistory: [],
+  });
+
+  assert.equal(result.verdict, "PARTIAL");
+  assert.match(result.what_was_right, /AB/i);
+  assert.match(result.gap || "", /AC/i);
+  assert.match(result.gap || "", /-1, 3, 3/);
+});
+
+test("evaluateConcept deterministically marks correct named vectors as CORRECT", async () => {
+  let called = false;
+  const result = await evaluateConcept({
+    stageGoal: "Use AB and AC to set up the angle formula.",
+    learnerInput: "AB=(3,-3,4) and AC=(-1,3,3)",
+    lessonContext: {
+      plan: {
+        analyticContext: {
+          entities: {
+            points: [
+              { label: "A", coordinates: [1, 2, -1] },
+              { label: "B", coordinates: [4, -1, 3] },
+              { label: "C", coordinates: [0, 5, 2] },
+            ],
+          },
+        },
+      },
+    },
+    prediction: "",
+    learnerHistory: [],
+  }, {
+    converseWithModelFailover: async () => {
+      called = true;
+      return "{}";
+    },
+  });
+
+  assert.equal(called, false);
+  assert.equal(result.verdict, "CORRECT");
+});
+
+test("hasPositiveTutorSignal detects progression acknowledgements", () => {
+  assert.equal(hasPositiveTutorSignal("Great work. Let's move forward."), true);
+  assert.equal(hasPositiveTutorSignal("Excellent reasoning on that step."), true);
+  assert.equal(hasPositiveTutorSignal("Let's inspect one more detail first."), false);
+});
+
+test("evaluateStageProgression returns NO without layer-1 signal", async () => {
+  let called = false;
+  const result = await evaluateStageProgression({
+    currentStage: { id: "stage-1", goal: "Read the setup" },
+    nextStage: { id: "stage-2", goal: "Use AB" },
+    learningState: { learningStage: "build" },
+    nextLearningStage: "build",
+    conceptVerdict: { verdict: "CORRECT" },
+    learnerInput: "AB = (4,0,0)",
+    tutorReply: "Try checking one more thing.",
+    assessment: {},
+  }, {
+    converseWithModelFailover: async () => {
+      called = true;
+      return "{\"progress\":\"YES\",\"reason\":\"ready\"}";
+    },
+  });
+
+  assert.equal(called, false);
+  assert.equal(result.shouldProgress, false);
+  assert.equal(result.layer1Matched, false);
+  assert.equal(result.layer2Decision, "NO");
+});
+
+test("evaluateStageProgression respects layer-2 YES decision", async () => {
+  const result = await evaluateStageProgression({
+    currentStage: { id: "stage-1", goal: "Read the setup" },
+    nextStage: { id: "stage-2", goal: "Use AB" },
+    learningState: { learningStage: "build" },
+    nextLearningStage: "build",
+    conceptVerdict: { verdict: "CORRECT" },
+    learnerInput: "AB = (4,0,0)",
+    tutorReply: "Great job. You're ready for the next step.",
+    assessment: {},
+  }, {
+    converseWithModelFailover: async () => "{\"progress\":\"YES\",\"reason\":\"stage goal satisfied\"}",
+  });
+
+  assert.equal(result.layer1Matched, true);
+  assert.equal(result.layer2Decision, "YES");
+  assert.equal(result.shouldProgress, true);
+});
+
+test("evaluateStageProgression respects layer-2 NO decision", async () => {
+  const result = await evaluateStageProgression({
+    currentStage: { id: "stage-1", goal: "Read the setup" },
+    nextStage: { id: "stage-2", goal: "Use AB" },
+    learningState: { learningStage: "build" },
+    nextLearningStage: "build",
+    conceptVerdict: { verdict: "CORRECT" },
+    learnerInput: "AB = (4,0,0)",
+    tutorReply: "Excellent work.",
+    assessment: {},
+  }, {
+    converseWithModelFailover: async () => "{\"progress\":\"NO\",\"reason\":\"needs one more confirmation\"}",
+  });
+
+  assert.equal(result.layer1Matched, true);
+  assert.equal(result.layer2Decision, "NO");
+  assert.equal(result.shouldProgress, false);
+});
+
+test("evaluateStageProgression blocks when concept verdict is not CORRECT", async () => {
+  let called = false;
+  const result = await evaluateStageProgression({
+    currentStage: { id: "stage-1", goal: "Read the setup" },
+    nextStage: { id: "stage-2", goal: "Use AB" },
+    learningState: { learningStage: "build" },
+    nextLearningStage: "build",
+    conceptVerdict: { verdict: "PARTIAL" },
+    learnerInput: "AB = (4,0,0)",
+    tutorReply: "Great effort.",
+    assessment: {},
+  }, {
+    converseWithModelFailover: async () => {
+      called = true;
+      return "{\"progress\":\"YES\",\"reason\":\"ready\"}";
+    },
+  });
+
+  assert.equal(called, false);
+  assert.equal(result.shouldProgress, false);
+  assert.equal(result.layer2Decision, "NO");
 });

@@ -129,6 +129,26 @@ test("mergeGeneratedPlan prefers the cleaner baseline scaffold for multimodal so
   );
 });
 
+test("mergeGeneratedPlan keeps the baseline scaffold for text-only solid metric lessons", () => {
+  const baselinePlan = baselineCuboidPlan();
+  const novaPlan = noisyNovaCuboidPlan();
+  baselinePlan.sourceSummary.inputMode = "text";
+  novaPlan.sourceSummary.inputMode = "text";
+
+  const merged = mergeGeneratedPlan({
+    baselinePlan,
+    novaPlan,
+    workingQuestion: baselinePlan.problem.question,
+    mode: "guided",
+  });
+
+  assert.deepEqual(
+    merged.objectSuggestions.map((suggestion) => suggestion.id),
+    baselinePlan.objectSuggestions.map((suggestion) => suggestion.id),
+  );
+  assert.equal(merged.objectSuggestions.some((suggestion) => suggestion.object.shape === "plane"), false);
+});
+
 test("mergeGeneratedPlan keeps an analytic baseline scaffold intact", () => {
   const baselinePlan = normalizeScenePlan({
     problem: {

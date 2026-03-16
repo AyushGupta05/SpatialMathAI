@@ -8,7 +8,7 @@ import { buildTutorSystemPrompt, buildFallbackTutorReply, buildFullSolutionRevea
 import { converseStreamWithModelFailover } from "../services/modelInvoker.js";
 import { buildTutorResponseMeta } from "../services/tutorMetadata.js";
 import { generateSimilarTutorQuestions } from "../services/tutorSimilar.js";
-import { evaluateConcept, isTrivialInteraction } from "../services/conceptEvaluator.js";
+import { evaluateConcept, evaluateStageProgression, isTrivialInteraction } from "../services/conceptEvaluator.js";
 import { currentVerdictEntry } from "../../src/core/tutorActions.js";
 
 const LEARNING_STAGE_SEQUENCE = ["orient", "build", "predict", "check", "reflect", "challenge"];
@@ -235,6 +235,7 @@ export function createTutorRoute({
   freeformTurnGenerator = generateFreeformTutorTurn,
   completionEvaluator = evaluateTutorCompletion,
   conceptEvaluator = evaluateConcept,
+  progressionEvaluator = evaluateStageProgression,
   trivialityCheck = isTrivialInteraction,
   similarQuestionGenerator = generateSimilarTutorQuestions,
 } = {}) {
@@ -441,10 +442,12 @@ ${instruction}`.trim();
     const completionState = numericCompletion.complete
       ? numericCompletion
       : { complete: false, reason: null };
+    const currentStage = currentStageForReply(plan, effectiveLearningState, contextStepId, assessment);
     const nextStage = nextStageForReply(plan, effectiveLearningState, contextStepId, assessment, conceptVerdict);
     const nextLearningStageKey = plan?.experienceMode === "analytic_auto"
       ? (effectiveLearningState?.learningStage || "build")
       : nextLearningStage(effectiveLearningState?.learningStage || "orient", conceptVerdict, assessment);
+    const currentLearningStageKey = effectiveLearningState?.learningStage || "orient";
 
     const responseKind = revealSolution
       ? "solution_shown"
@@ -470,47 +473,19 @@ ${instruction}`.trim();
         }
         : null,
     });
-    if (nextStage?.id) {
-      responseMeta.stageStatus = {
-        ...(responseMeta.stageStatus || {}),
-        currentStageId: nextStage.id,
-      };
-      if (
-        plan?.experienceMode === "analytic_auto"
-        && conceptVerdict?.verdict === "CORRECT"
-        && !completionState.complete
-      ) {
-        const nextSceneMoment = sceneMomentForStageId(plan, nextStage.id);
-        if (nextSceneMoment) {
-          responseMeta.focusTargets = nextSceneMoment.focusTargets?.length
-            ? nextSceneMoment.focusTargets
-            : responseMeta.focusTargets;
-          responseMeta.sceneDirective = {
-            ...(responseMeta.sceneDirective || {}),
-            stageId: nextSceneMoment.id,
-            cameraBookmarkId: nextSceneMoment.cameraBookmarkId || responseMeta.sceneDirective?.cameraBookmarkId || null,
-            focusTargets: responseMeta.focusTargets,
-            visibleObjectIds: nextSceneMoment.visibleObjectIds || [],
-            visibleOverlayIds: nextSceneMoment.visibleOverlayIds || [],
-            revealFormula: Boolean(nextSceneMoment.revealFormula),
-            revealFullSolution: Boolean(nextSceneMoment.revealFullSolution),
-          };
-        }
-      }
-    }
-    responseMeta.nextLearningStage = nextLearningStageKey;
-    if (conceptVerdict?.verdict === "CORRECT" && nextStage?.checkpointPrompt) {
-      responseMeta.checkpoint = {
-        prompt: nextStage.checkpointPrompt,
-        options: ["yes", "not_sure"],
-      };
-    }
+    responseMeta.nextLearningStage = currentLearningStageKey;
 
     const assessmentPayload = {
       ...(assessment || {}),
       verdict: conceptVerdict?.verdict ?? null,
-      nextStage: stagePayload(nextStage),
-      nextLearningStage: nextLearningStageKey,
+      nextStage: stagePayload(currentStage),
+      nextLearningStage: currentLearningStageKey,
+      stageProgress: {
+        shouldProgress: false,
+        layer1Matched: false,
+        layer2Decision: "NO",
+        reason: "",
+      },
     };
     const systemPrompt = buildTutorSystemPrompt({
       plan,
@@ -553,13 +528,93 @@ ${instruction}`.trim();
           await stream.writeSSE({ data: JSON.stringify({ type: "done" }) });
           return;
         }
+        let tutorReplyText = "";
         for await (const chunk of streamModel("text", systemPrompt, messages, {
           maxTokens: 1024,
           temperature: 0.35,
         })) {
+          tutorReplyText += chunk;
           await stream.writeSSE({ data: JSON.stringify({ type: "text", content: chunk }) });
         }
-        await stream.writeSSE({ data: JSON.stringify({ type: "assessment", content: assessmentPayload }) });
+
+        const progressionDecision = await progressionEvaluator({
+          plan,
+          assessment,
+          learningState: effectiveLearningState,
+          conceptVerdict,
+          learnerInput: userMessage,
+          tutorReply: tutorReplyText,
+          currentStage,
+          nextStage,
+          nextLearningStage: nextLearningStageKey,
+        });
+        const shouldProgress = Boolean(
+          !completionState.complete
+          && nextStage?.id
+          && currentStage?.id
+          && nextStage.id !== currentStage.id
+          && progressionDecision?.shouldProgress
+        );
+        const resolvedStage = shouldProgress ? nextStage : currentStage;
+        const resolvedLearningStage = shouldProgress ? nextLearningStageKey : currentLearningStageKey;
+
+        const finalizedStageProgress = {
+          shouldProgress,
+          layer1Matched: Boolean(progressionDecision?.layer1Matched),
+          layer2Decision: progressionDecision?.layer2Decision || "NO",
+          reason: progressionDecision?.reason || "",
+        };
+
+        const finalizedMeta = {
+          ...responseMeta,
+          conceptVerdict,
+          nextLearningStage: resolvedLearningStage,
+          stageProgress: finalizedStageProgress,
+          stageStatus: {
+            ...(responseMeta.stageStatus || {}),
+            currentStageId: resolvedStage?.id || responseMeta.stageStatus?.currentStageId || null,
+          },
+        };
+
+        if (
+          shouldProgress
+          && plan?.experienceMode === "analytic_auto"
+          && conceptVerdict?.verdict === "CORRECT"
+        ) {
+          const nextSceneMoment = sceneMomentForStageId(plan, resolvedStage?.id || null);
+          if (nextSceneMoment) {
+            finalizedMeta.focusTargets = nextSceneMoment.focusTargets?.length
+              ? nextSceneMoment.focusTargets
+              : finalizedMeta.focusTargets;
+            finalizedMeta.sceneDirective = {
+              ...(finalizedMeta.sceneDirective || {}),
+              stageId: nextSceneMoment.id,
+              cameraBookmarkId: nextSceneMoment.cameraBookmarkId || finalizedMeta.sceneDirective?.cameraBookmarkId || null,
+              focusTargets: finalizedMeta.focusTargets,
+              visibleObjectIds: nextSceneMoment.visibleObjectIds || [],
+              visibleOverlayIds: nextSceneMoment.visibleOverlayIds || [],
+              revealFormula: Boolean(nextSceneMoment.revealFormula),
+              revealFullSolution: Boolean(nextSceneMoment.revealFullSolution),
+            };
+          }
+        }
+
+        if (conceptVerdict?.verdict === "CORRECT" && shouldProgress && resolvedStage?.checkpointPrompt) {
+          finalizedMeta.checkpoint = {
+            prompt: resolvedStage.checkpointPrompt,
+            options: ["yes", "not_sure"],
+          };
+        }
+
+        const finalizedAssessmentPayload = {
+          ...assessmentPayload,
+          nextStage: stagePayload(resolvedStage),
+          nextLearningStage: resolvedLearningStage,
+          stageProgress: finalizedStageProgress,
+        };
+
+        await stream.writeSSE({ data: JSON.stringify({ type: "meta", content: finalizedMeta }) });
+        await stream.writeSSE({ data: JSON.stringify({ type: "assessment", content: finalizedAssessmentPayload }) });
         await stream.writeSSE({ data: JSON.stringify({ type: "done" }) });
       } catch (error) {
         console.error("Tutor stream error:", error);

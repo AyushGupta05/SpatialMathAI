@@ -88,6 +88,18 @@ function autoAdvanceEnabled(plan = {}) {
   return plan?.autoAdvance !== false;
 }
 
+function normalizeVerdictLabel(value = null) {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (!normalized) return null;
+  if (normalized === "INCORRECT" || normalized === "WRONG") {
+    return "STUCK";
+  }
+  if (["CORRECT", "PARTIAL", "STUCK"].includes(normalized)) {
+    return normalized;
+  }
+  return null;
+}
+
 export function currentVerdictEntry(learningState = {}) {
   const learnerHistory = Array.isArray(learningState?.learnerHistory) ? learningState.learnerHistory : [];
   for (let index = learnerHistory.length - 1; index >= 0; index -= 1) {
@@ -178,7 +190,7 @@ function initialActionsForStage(plan = {}, stage = null, learningState = {}) {
 
   switch (stageType) {
     case "ORIENT":
-      return [showHint("What should I focus on?")];
+      return [showHint("What should I notice?")];
     case "PREDICT":
       return [showHint("How do I start?")];
     case "BUILD":
@@ -267,9 +279,11 @@ export function resolveTutorActionState({
 } = {}) {
   const derivedLearningState = cloneLearningState(learningState);
   const stageType = stageTypeForContext(plan, stage, derivedLearningState);
-  const lastVerdict = conceptVerdict?.verdict
+  const lastVerdict = normalizeVerdictLabel(
+    conceptVerdict?.verdict
     || currentVerdictEntry(derivedLearningState)?.verdict
-    || null;
+    || null
+  );
 
   if (completionState?.complete || responseKind === "solution_shown" || responseKind === "lesson_complete") {
     return {
@@ -287,7 +301,37 @@ export function resolveTutorActionState({
     };
   }
 
-  if (responseKind === "stage_opening" || responseKind === "non_evaluated") {
+  if (responseKind === "stage_opening") {
+    return {
+      stageType,
+      lastVerdict,
+      actions: initialActionsForStage(plan, stage, derivedLearningState),
+    };
+  }
+
+  if (responseKind === "non_evaluated") {
+    if (lastVerdict === "CORRECT") {
+      return {
+        stageType,
+        lastVerdict,
+        actions: actionsForCorrect(plan),
+      };
+    }
+    if (lastVerdict === "PARTIAL") {
+      const gap = conceptVerdict?.gap || currentVerdictEntry(derivedLearningState)?.gap || null;
+      return {
+        stageType,
+        lastVerdict,
+        actions: actionsForPartial(gap),
+      };
+    }
+    if (lastVerdict === "STUCK") {
+      return {
+        stageType,
+        lastVerdict,
+        actions: actionsForStuck(plan, stage, derivedLearningState),
+      };
+    }
     return {
       stageType,
       lastVerdict,
