@@ -32,7 +32,7 @@ import { initUnfoldDrawer, setUnfoldRepresentationMode, syncUnfoldDrawer } from 
 import { hasMathMarkup, renderMathBlockHtml, renderRichTextHtml } from "./mathMarkup.js";
 import { MicrophoneCapture } from "./microphoneCapture.js";
 import { PcmAudioPlayer } from "./pcmAudioPlayer.js";
-import { hideEvidence, initEvidencePanel, registerEvidenceAutoClose, showEvidence } from "./evidencePanel.js";
+import { closeEvidence, hideEvidence, initEvidencePanel, registerEvidenceAutoClose, showEvidence } from "./evidencePanel.js";
 import { extractPastedQuestionImageFile, prepareQuestionImageForUpload } from "./questionImage.js";
 import {
   normalizeTutorReplyText,
@@ -114,6 +114,7 @@ let checkpointUnsureBtn;
 let sceneInfo;
 let sceneValidation;
 let cameraBookmarkList;
+let cameraBookmarkPanel = null;
 let objectCount;
 let stepIndicator;
 let formulaCard;
@@ -1605,7 +1606,9 @@ function renderAssessment(assessment) {
 function renderCameraBookmarks(plan = activePlan()) {
   if (!cameraBookmarkList) return;
   cameraBookmarkList.innerHTML = "";
-  (plan?.cameraBookmarks || []).forEach((bookmark) => {
+  const bookmarks = plan?.cameraBookmarks || [];
+  cameraBookmarkPanel?.classList.toggle("hidden", !bookmarks.length);
+  bookmarks.forEach((bookmark) => {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "camera-bookmark-btn";
@@ -1615,6 +1618,71 @@ function renderCameraBookmarks(plan = activePlan()) {
       cameraDirector.animateTo(bookmark.position, bookmark.target, 900);
     });
     cameraBookmarkList.appendChild(button);
+  });
+}
+
+function initCameraBookmarkPanel() {
+  if (!stageWrapEl || !cameraBookmarkList || cameraBookmarkPanel) return;
+
+  const panel = document.createElement("section");
+  panel.className = "camera-bookmark-panel hidden";
+  panel.innerHTML = `
+    <div class="camera-bookmark-panel-header">
+      <div>
+        <p class="camera-bookmark-panel-eyebrow">Scene Camera</p>
+        <h3 class="camera-bookmark-panel-title">Views</h3>
+      </div>
+      <span class="camera-bookmark-panel-hint">Drag</span>
+    </div>
+  `;
+  panel.appendChild(cameraBookmarkList);
+  stageWrapEl.appendChild(panel);
+  cameraBookmarkPanel = panel;
+
+  const header = panel.querySelector(".camera-bookmark-panel-header");
+  if (!header) return;
+
+  let dragState = null;
+
+  const stopDrag = () => {
+    if (!dragState) return;
+    window.removeEventListener("pointermove", onPointerMove);
+    window.removeEventListener("pointerup", stopDrag);
+    window.removeEventListener("pointercancel", stopDrag);
+    panel.classList.remove("is-dragging");
+    dragState = null;
+  };
+
+  const onPointerMove = (event) => {
+    if (!dragState || !stageWrapEl) return;
+    const bounds = stageWrapEl.getBoundingClientRect();
+    const panelWidth = panel.offsetWidth;
+    const panelHeight = panel.offsetHeight;
+    const nextLeft = Math.min(
+      Math.max(12, event.clientX - bounds.left - dragState.offsetX),
+      Math.max(12, bounds.width - panelWidth - 12),
+    );
+    const nextTop = Math.min(
+      Math.max(12, event.clientY - bounds.top - dragState.offsetY),
+      Math.max(12, bounds.height - panelHeight - 12),
+    );
+    panel.style.left = `${nextLeft}px`;
+    panel.style.top = `${nextTop}px`;
+    panel.style.right = "auto";
+  };
+
+  header.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    const panelRect = panel.getBoundingClientRect();
+    dragState = {
+      offsetX: event.clientX - panelRect.left,
+      offsetY: event.clientY - panelRect.top,
+    };
+    panel.classList.add("is-dragging");
+    header.setPointerCapture?.(event.pointerId);
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", stopDrag);
+    window.addEventListener("pointercancel", stopDrag);
   });
 }
 
@@ -1987,6 +2055,7 @@ async function handleQuestionSubmit(overrides = {}) {
       },
     });
     setPlan(scenePlan);
+    closeEvidence(700);
     setQuestionStatus("", "hidden");
   } catch (error) {
     console.error("Plan request failed:", error);
@@ -3383,6 +3452,7 @@ export function initTutorController(context) {
   if (stageWrapEl) {
     initEvidencePanel(stageWrapEl);
     initLabelRenderer(stageWrapEl);
+    initCameraBookmarkPanel();
   }
 
   bindDom();

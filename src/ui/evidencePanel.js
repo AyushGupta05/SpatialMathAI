@@ -14,23 +14,34 @@ function escapeHtml(value = "") {
 function renderList(items = []) {
   const values = Array.isArray(items) ? items.filter(Boolean) : [];
   if (!values.length) {
-    return "<li>No extracted givens yet.</li>";
+    return '<li class="evidence-panel-empty">No extracted givens yet.</li>';
   }
   return values.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
 }
 
 function buildEvidencePanelHTML(data = {}) {
   const score = Math.max(0, Math.min(1, Number(data?.retrieval?.similarity_score || 0)));
+  const scorePercent = Math.round(score * 100);
+  const matchTitle = escapeHtml(data?.retrieval?.matched_title || "No match yet");
+  const summary = escapeHtml(data?.extracted?.diagram_summary || "No diagram summary provided.");
+  const why = escapeHtml(data?.retrieval?.why || "");
   const imageMarkup = data.input_had_image && data._imageUrl
     ? `
-      <img
-        src="${escapeHtml(data._imageUrl)}"
-        style="max-width:120px;border-radius:4px"
-        alt="uploaded diagram"
-      />
-      <span class="badge badge-info">Spatial Math AI read this image</span>
+      <div class="evidence-panel-media-frame">
+        <img
+          src="${escapeHtml(data._imageUrl)}"
+          class="evidence-panel-image"
+          alt="uploaded diagram"
+        />
+      </div>
+      <span class="badge badge-info">Diagram input</span>
     `
-    : `<span class="badge badge-muted">Text input</span>`;
+    : `
+      <div class="evidence-panel-source-card">
+        <span class="badge badge-muted">Text input</span>
+        <p class="evidence-panel-source-copy">Parsed directly from the typed problem statement.</p>
+      </div>
+    `;
 
   return `
     <div class="agent-trace-card evidence-panel-grid">
@@ -38,18 +49,21 @@ function buildEvidencePanelHTML(data = {}) {
         ${imageMarkup}
       </div>
       <div class="evidence-panel-column">
-        <p class="label-muted">Spatial Math AI extracted</p>
+        <div class="evidence-panel-heading">
+          <p class="label-muted">Spatial Math AI extracted</p>
+          <span class="evidence-panel-score">${scorePercent}% match</span>
+        </div>
         <ul class="evidence-panel-list">
           ${renderList(data?.extracted?.givens || [])}
         </ul>
-        <em>${escapeHtml(data?.extracted?.diagram_summary || "No diagram summary provided.")}</em>
-        <hr />
+        <p class="evidence-panel-summary">${summary}</p>
+        <div class="evidence-panel-divider"></div>
         <p class="label-muted">Matched lesson type</p>
-        <strong>${escapeHtml(data?.retrieval?.matched_title || "No match yet")}</strong>
+        <strong class="evidence-panel-match">${matchTitle}</strong>
         <div class="score-bar">
           <div class="score-bar-fill" style="width:${score * 100}%"></div>
         </div>
-        <span class="tag">${escapeHtml(data?.retrieval?.why || "")}</span>
+        ${why ? `<span class="tag">${why}</span>` : ""}
       </div>
     </div>
   `;
@@ -89,15 +103,21 @@ export function registerEvidenceAutoClose(delayMs = 800) {
   clearPendingClose();
   firstObjectListener = () => {
     firstObjectListener = null;
-    closeTimerId = window.setTimeout(() => {
-      closeTimerId = null;
-      if (!panelEl) return;
-      panelEl.classList.remove("evidence--visible");
-      panelEl.classList.add("evidence--hidden");
-      panelEl.setAttribute("aria-hidden", "true");
-    }, delayMs);
+    closeEvidence(delayMs);
   };
   document.addEventListener("scene:first-object", firstObjectListener, { once: true });
+}
+
+export function closeEvidence(delayMs = 0) {
+  if (!panelEl) return;
+  clearPendingClose();
+  closeTimerId = window.setTimeout(() => {
+    closeTimerId = null;
+    if (!panelEl) return;
+    panelEl.classList.remove("evidence--visible");
+    panelEl.classList.add("evidence--hidden");
+    panelEl.setAttribute("aria-hidden", "true");
+  }, delayMs);
 }
 
 export function hideEvidence() {
