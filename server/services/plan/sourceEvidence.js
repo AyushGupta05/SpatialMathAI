@@ -12,6 +12,7 @@ export function buildSourceEvidence(sourceSummary = {}) {
   return {
     inputMode: sourceSummary.inputMode || "text",
     givens: uniqueStrings(sourceSummary.givens || []),
+    labels: uniqueStrings(sourceSummary.labels || []),
     diagramSummary,
     conflicts: uniqueStrings(sourceSummary.conflicts || []),
   };

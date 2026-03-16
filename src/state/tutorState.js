@@ -19,8 +19,12 @@ export class TutorState extends EventTarget {
       phase: "idle",
       mode: "guided",
       currentStep: 0,
-      hintsUsed: 0,
-      maxHints: 3,
+      hint_state: {
+        current_stage_hints: 0,
+        max_hints: 3,
+        escalate_next: false,
+        total_stuck_count: 0,
+      },
       history: [],
       plan: null,
       latestAssessment: null,
@@ -39,7 +43,6 @@ export class TutorState extends EventTarget {
         submitted: false,
       },
       learnerHistory: [],
-      stuckCount: 0,
       transcriptCollapsed: true,
       followUpCollapsed: true,
       error: null,
@@ -49,8 +52,7 @@ export class TutorState extends EventTarget {
   get phase() { return this._state.phase; }
   get mode() { return this._state.mode; }
   get currentStep() { return this._state.currentStep; }
-  get hintsUsed() { return this._state.hintsUsed; }
-  get maxHints() { return this._state.maxHints; }
+  get hint_state() { return this._state.hint_state; }
   get history() { return this._state.history; }
   get plan() { return this._state.plan; }
   get latestAssessment() { return this._state.latestAssessment; }
@@ -62,7 +64,6 @@ export class TutorState extends EventTarget {
   get learningStage() { return this._state.learningStage; }
   get predictionState() { return this._state.predictionState; }
   get learnerHistory() { return this._state.learnerHistory; }
-  get stuckCount() { return this._state.stuckCount; }
   get transcriptCollapsed() { return this._state.transcriptCollapsed; }
   get followUpCollapsed() { return this._state.followUpCollapsed; }
   get error() { return this._state.error; }
@@ -72,6 +73,7 @@ export class TutorState extends EventTarget {
     return {
       ...this._state,
       history: [...this._state.history],
+      hint_state: { ...this._state.hint_state },
       completionState: { ...this._state.completionState },
       similarQuestions: [...this._state.similarQuestions],
       learnerHistory: [...this._state.learnerHistory],
@@ -89,7 +91,12 @@ export class TutorState extends EventTarget {
     this._state.plan = plan;
     this._state.mode = options.mode || plan?.problem?.mode || "guided";
     this._state.currentStep = 0;
-    this._state.hintsUsed = 0;
+    this._state.hint_state = {
+      current_stage_hints: 0,
+      max_hints: this._state.hint_state?.max_hints || 3,
+      escalate_next: false,
+      total_stuck_count: 0,
+    };
     this._state.latestAssessment = null;
     this._state.learningStage = "orient";
     this._state.completionState = {
@@ -103,7 +110,6 @@ export class TutorState extends EventTarget {
       submitted: false,
     };
     this._state.learnerHistory = [];
-    this._state.stuckCount = 0;
     this._state.transcriptCollapsed = true;
     this._state.followUpCollapsed = true;
     this._state.error = null;
@@ -222,9 +228,9 @@ export class TutorState extends EventTarget {
   }
 
   useHint() {
-    if (this._state.hintsUsed >= this._state.maxHints) return false;
-    this._state.hintsUsed += 1;
-    this._emit("hint", { hintsUsed: this._state.hintsUsed });
+    if (this._state.hint_state.current_stage_hints >= this._state.hint_state.max_hints) return false;
+    this._state.hint_state.current_stage_hints += 1;
+    this._emit("hint", { hint_state: { ...this._state.hint_state } });
     return true;
   }
 
@@ -240,11 +246,16 @@ export class TutorState extends EventTarget {
     };
     this._state.learnerHistory.push(entry);
     if (verdict === "STUCK") {
-      this._state.stuckCount += 1;
-    } else {
-      this._state.stuckCount = 0;
+      this._state.hint_state.current_stage_hints += 1;
+      this._state.hint_state.total_stuck_count += 1;
+      if (this._state.hint_state.current_stage_hints >= this._state.hint_state.max_hints) {
+        this._state.hint_state.escalate_next = true;
+      }
+    } else if (verdict === "CORRECT") {
+      this._state.hint_state.current_stage_hints = 0;
+      this._state.hint_state.escalate_next = false;
     }
-    this._emit("verdict", { verdict: entry, stuckCount: this._state.stuckCount });
+    this._emit("verdict", { verdict: entry, hint_state: { ...this._state.hint_state } });
     return entry;
   }
 
@@ -278,8 +289,12 @@ export class TutorState extends EventTarget {
       phase: "idle",
       mode: "guided",
       currentStep: 0,
-      hintsUsed: 0,
-      maxHints: 3,
+      hint_state: {
+        current_stage_hints: 0,
+        max_hints: 3,
+        escalate_next: false,
+        total_stuck_count: 0,
+      },
       history: [],
       plan: null,
       latestAssessment: null,
@@ -298,7 +313,6 @@ export class TutorState extends EventTarget {
         submitted: false,
       },
       learnerHistory: [],
-      stuckCount: 0,
       transcriptCollapsed: true,
       followUpCollapsed: true,
       error: null,

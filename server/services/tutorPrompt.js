@@ -78,16 +78,356 @@ function titlesForSuggestionIds(plan, ids = []) {
   return ids.map((id) => byId.get(id) || id);
 }
 
-function stuckStrategy(stuckCount = 0) {
-  if (stuckCount <= 1) return "ANALOGY";
-  if (stuckCount === 2) return "SIMPLER_QUESTION";
+function stuckStrategy(hintCount = 0) {
+  if (hintCount <= 1) return "ANALOGY";
+  if (hintCount === 2) return "SIMPLER_QUESTION";
   return "SCENE_FOCUS";
+}
+
+function fullSolutionLines(plan = {}) {
+  const normalizedPlan = normalizeScenePlan(plan);
+  const lines = [];
+  const formula = String(normalizedPlan.answerScaffold?.formula || "").trim();
+  const explanation = String(normalizedPlan.answerScaffold?.explanation || "").trim();
+  const finalAnswer = normalizedPlan.answerScaffold?.finalAnswer;
+  const unit = String(normalizedPlan.answerScaffold?.unit || "").trim();
+  const analyticSteps = normalizedPlan.analyticContext?.solutionSteps || [];
+
+  if (formula) {
+    lines.push(`Formula: ${formula}`);
+  }
+
+  if (analyticSteps.length) {
+    analyticSteps.forEach((step, index) => {
+      const formulaLine = String(step.formula || "").trim();
+      const explanationLine = String(step.explanation || "").trim();
+      const detail = [formulaLine, explanationLine].filter(Boolean).join(" — ");
+      lines.push(`${index + 1}. ${step.title}${detail ? `: ${detail}` : ""}`);
+    });
+  } else if (explanation) {
+    lines.push(explanation);
+  }
+
+  if (finalAnswer !== undefined && finalAnswer !== null && String(finalAnswer).trim()) {
+    lines.push(`Final answer: ${String(finalAnswer).trim()}${unit ? ` ${unit}` : ""}`);
+  }
+
+  return lines.filter(Boolean);
+}
+
+function normalizeSolutionText(value = "") {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function formatSolutionNumber(value, digits = 2) {
+  const next = Number(value);
+  if (!Number.isFinite(next)) return "0";
+  const rounded = Number(next.toFixed(digits));
+  return Number.isInteger(rounded)
+    ? String(rounded)
+    : rounded.toFixed(digits).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function formatFinalAnswerText(answerScaffold = {}) {
+  const finalAnswer = answerScaffold?.finalAnswer;
+  const unit = normalizeSolutionText(answerScaffold?.unit || "");
+  const valueText = Array.isArray(finalAnswer)
+    ? `(${finalAnswer.map((value) => String(value).trim()).filter(Boolean).join(", ")})`
+    : String(finalAnswer ?? "").trim();
+  if (!valueText) return "";
+  return unit && !valueText.toLowerCase().includes(unit.toLowerCase())
+    ? `${valueText} ${unit}`.trim()
+    : valueText;
+}
+
+function solutionSourceText(plan = {}) {
+  const givens = Array.isArray(plan?.sourceSummary?.givens) ? plan.sourceSummary.givens : [];
+  return [
+    plan?.sourceSummary?.cleanedQuestion,
+    plan?.problem?.question,
+    ...givens,
+  ].filter(Boolean).join(" ");
+}
+
+function parsePointMap(text = "") {
+  const points = new Map();
+  const pointPattern = /\b([A-Z])\s*\(\s*([-+]?\d*\.?\d+(?:\s*,\s*[-+]?\d*\.?\d+){2})\s*\)/g;
+  let match = pointPattern.exec(text);
+  while (match) {
+    const label = match[1];
+    const coordinates = match[2]
+      .split(/\s*,\s*/)
+      .map((value) => Number(value));
+    if (coordinates.length === 3 && coordinates.every((value) => Number.isFinite(value))) {
+      points.set(label, coordinates);
+    }
+    match = pointPattern.exec(text);
+  }
+  return points;
+}
+
+function parseVectorLabels(text = "") {
+  const patterns = [
+    /angle between (?:two |the )?(?:vectors?|lines?)\s+([A-Z]{2})\s*(?:,|and)\s*([A-Z]{2})/i,
+    /vectors?\s+([A-Z]{2})\s*(?:,|and)\s*([A-Z]{2})/i,
+    /lines?\s+([A-Z]{2})\s*(?:,|and)\s*([A-Z]{2})/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match) {
+      return [match[1].toUpperCase(), match[2].toUpperCase()];
+    }
+  }
+
+  return [null, null];
+}
+
+function vectorFromPoints(start = [], end = []) {
+  if (!Array.isArray(start) || !Array.isArray(end) || start.length !== 3 || end.length !== 3) {
+    return null;
+  }
+  return end.map((value, index) => Number(value) - Number(start[index]));
+}
+
+function parenthesizedValueTex(value) {
+  const formatted = formatSolutionNumber(value);
+  return Number(value) < 0 ? `(${formatted})` : formatted;
+}
+
+function tupleTex(values = []) {
+  return `(${values.map((value) => formatSolutionNumber(value)).join(", ")})`;
+}
+
+function tuplePlain(values = []) {
+  return `(${values.map((value) => formatSolutionNumber(value)).join(", ")})`;
+}
+
+function differenceTupleTex(start = [], end = []) {
+  return `(${end.map((value, index) => `${formatSolutionNumber(value)}-${parenthesizedValueTex(start[index])}`).join(", ")})`;
+}
+
+function squaredTermsTex(values = []) {
+  return values.map((value) => `${parenthesizedValueTex(value)}^2`).join(" + ");
+}
+
+function squaredValuesTex(values = []) {
+  return values.map((value) => formatSolutionNumber(Number(value) ** 2)).join(" + ");
+}
+
+function signedTermsTex(values = []) {
+  return values.map((value, index) => {
+    const formatted = formatSolutionNumber(Math.abs(Number(value)));
+    if (index === 0) {
+      return Number(value) < 0 ? `-${formatted}` : formatted;
+    }
+    return Number(value) < 0 ? `- ${formatted}` : `+ ${formatted}`;
+  }).join(" ");
+}
+
+function vectorLabelTex(label = "") {
+  return `\\overrightarrow{${label}}`;
+}
+
+function buildLineLineRevealSections(plan = {}) {
+  const sourceText = solutionSourceText(plan);
+  const relationships = Array.isArray(plan?.sourceSummary?.relationships) ? plan.sourceSummary.relationships : [];
+  const looksLikeLineLine = relationships.includes("angle_type:line_line")
+    || /angle between (?:two |the )?(?:vectors?|lines?)/i.test(sourceText)
+    || /vectors?\s+[A-Z]{2}\s*(?:,|and)\s*[A-Z]{2}/i.test(sourceText);
+
+  if (!looksLikeLineLine) return [];
+
+  const points = parsePointMap(sourceText);
+  const [vectorOneLabel, vectorTwoLabel] = parseVectorLabels(sourceText);
+  if (!vectorOneLabel || !vectorTwoLabel) return [];
+
+  const [startOneLabel, endOneLabel] = vectorOneLabel.split("");
+  const [startTwoLabel, endTwoLabel] = vectorTwoLabel.split("");
+  const startOne = points.get(startOneLabel);
+  const endOne = points.get(endOneLabel);
+  const startTwo = points.get(startTwoLabel);
+  const endTwo = points.get(endTwoLabel);
+  if (!startOne || !endOne || !startTwo || !endTwo) return [];
+
+  const vectorOne = vectorFromPoints(startOne, endOne);
+  const vectorTwo = vectorFromPoints(startTwo, endTwo);
+  if (!vectorOne || !vectorTwo) return [];
+
+  const dotTerms = vectorOne.map((value, index) => Number(value) * Number(vectorTwo[index]));
+  const dotProduct = dotTerms.reduce((total, value) => total + value, 0);
+  const vectorOneSquareSum = vectorOne.reduce((total, value) => total + (Number(value) ** 2), 0);
+  const vectorTwoSquareSum = vectorTwo.reduce((total, value) => total + (Number(value) ** 2), 0);
+  const vectorOneMagnitude = Math.sqrt(vectorOneSquareSum);
+  const vectorTwoMagnitude = Math.sqrt(vectorTwoSquareSum);
+  const denominator = vectorOneMagnitude * vectorTwoMagnitude;
+  if (!denominator) return [];
+
+  const cosineValue = Math.max(-1, Math.min(1, dotProduct / denominator));
+  const angleDegrees = (Math.acos(cosineValue) * 180) / Math.PI;
+  const angleText = formatSolutionNumber(angleDegrees);
+  const isPerpendicular = Math.abs(cosineValue) < 1e-9;
+
+  return [
+    {
+      type: "prose",
+      text: `We need to find the angle theta between vectors ${vectorOneLabel} and ${vectorTwoLabel} using the dot product.`,
+    },
+    {
+      type: "formula",
+      label: "Formula",
+      tex: `\\theta = \\arccos\\left(\\frac{${vectorLabelTex(vectorOneLabel)} \\cdot ${vectorLabelTex(vectorTwoLabel)}}{|${vectorLabelTex(vectorOneLabel)}|\\,|${vectorLabelTex(vectorTwoLabel)}|}\\right)`,
+    },
+    {
+      type: "step",
+      label: "Step 1",
+      description: `Find vector ${vectorOneLabel}`,
+      tex: `${vectorLabelTex(vectorOneLabel)} = ${endOneLabel} - ${startOneLabel} = ${differenceTupleTex(startOne, endOne)} = ${tupleTex(vectorOne)}`,
+      result: tuplePlain(vectorOne),
+    },
+    {
+      type: "step",
+      label: "Step 2",
+      description: `Find vector ${vectorTwoLabel}`,
+      tex: `${vectorLabelTex(vectorTwoLabel)} = ${endTwoLabel} - ${startTwoLabel} = ${differenceTupleTex(startTwo, endTwo)} = ${tupleTex(vectorTwo)}`,
+      result: tuplePlain(vectorTwo),
+    },
+    {
+      type: "step",
+      label: "Step 3",
+      description: `Compute ${vectorOneLabel} dot ${vectorTwoLabel}`,
+      tex: `${vectorLabelTex(vectorOneLabel)} \\cdot ${vectorLabelTex(vectorTwoLabel)} = ${vectorOne.map((value, index) => `(${formatSolutionNumber(value)})(${formatSolutionNumber(vectorTwo[index])})`).join(" + ")} = ${signedTermsTex(dotTerms)} = ${formatSolutionNumber(dotProduct)}`,
+      result: formatSolutionNumber(dotProduct),
+    },
+    {
+      type: "step",
+      label: "Step 4",
+      description: `Compute |${vectorOneLabel}|`,
+      tex: `|${vectorLabelTex(vectorOneLabel)}| = \\sqrt{${squaredTermsTex(vectorOne)}} = \\sqrt{${squaredValuesTex(vectorOne)}} = \\sqrt{${formatSolutionNumber(vectorOneSquareSum)}}`,
+      result: `sqrt(${formatSolutionNumber(vectorOneSquareSum)}) approx ${formatSolutionNumber(vectorOneMagnitude)}`,
+    },
+    {
+      type: "step",
+      label: "Step 5",
+      description: `Compute |${vectorTwoLabel}|`,
+      tex: `|${vectorLabelTex(vectorTwoLabel)}| = \\sqrt{${squaredTermsTex(vectorTwo)}} = \\sqrt{${squaredValuesTex(vectorTwo)}} = \\sqrt{${formatSolutionNumber(vectorTwoSquareSum)}}`,
+      result: `sqrt(${formatSolutionNumber(vectorTwoSquareSum)}) approx ${formatSolutionNumber(vectorTwoMagnitude)}`,
+    },
+    {
+      type: "step",
+      label: "Step 6",
+      description: "Apply the formula",
+      tex: `\\theta = \\arccos\\left(\\frac{${formatSolutionNumber(dotProduct)}}{\\sqrt{${formatSolutionNumber(vectorOneSquareSum)}} \\cdot \\sqrt{${formatSolutionNumber(vectorTwoSquareSum)}}}\\right) = \\arccos(${formatSolutionNumber(cosineValue)}) = ${angleText}^\\circ`,
+      result: `${angleText} degrees`,
+    },
+    {
+      type: "answer",
+      label: "Final answer",
+      tex: `\\theta = ${angleText}^\\circ`,
+      plain: isPerpendicular
+        ? `Final answer: ${angleText} degrees (the vectors are perpendicular)`
+        : `Final answer: ${angleText} degrees`,
+    },
+  ];
+}
+
+function buildGenericRevealSections(plan = {}) {
+  const analytic = plan?.analyticContext || {};
+  const formula = normalizeSolutionText(analytic.formulaCard?.formula || plan?.answerScaffold?.formula || "");
+  const finalAnswer = formatFinalAnswerText(plan?.answerScaffold || {});
+  const sections = [];
+  const questionText = normalizeSolutionText(plan?.sourceSummary?.cleanedQuestion || plan?.problem?.question || "");
+
+  if (questionText) {
+    sections.push({
+      type: "prose",
+      text: `We need to solve: ${questionText}`,
+    });
+  }
+
+  if (formula) {
+    sections.push({
+      type: "formula",
+      label: "Formula",
+      tex: formula,
+    });
+  }
+
+  (analytic.solutionSteps || []).forEach((step, index) => {
+    const tex = normalizeSolutionText(step?.formula || "");
+    const description = normalizeSolutionText(step?.explanation || step?.title || "");
+    if (!tex && !description) return;
+    sections.push({
+      type: "step",
+      label: `Step ${index + 1}`,
+      description: description || `Work through ${step?.title || `step ${index + 1}`}.`,
+      tex,
+      result: null,
+    });
+  });
+
+  if (finalAnswer) {
+    sections.push({
+      type: "answer",
+      label: "Final answer",
+      tex: finalAnswer,
+      plain: `Final answer: ${finalAnswer}`,
+    });
+  }
+
+  return sections;
+}
+
+function buildFullSolutionSections(plan = {}) {
+  const lineLineSections = buildLineLineRevealSections(plan);
+  if (lineLineSections.length) return lineLineSections;
+  return buildGenericRevealSections(plan);
+}
+
+function serializeFullSolutionSections(sections = []) {
+  return sections.map((section) => {
+    switch (section.type) {
+      case "prose":
+        return section.text || "";
+      case "formula":
+        return [`${section.label || "Formula"}:`, section.tex ? `$$${section.tex}$$` : ""]
+          .filter(Boolean)
+          .join("\n");
+      case "step":
+        return [
+          `${section.label || "Step"}${section.description ? ` - ${section.description}` : ""}`,
+          section.tex ? `$$${section.tex}$$` : "",
+          section.result ? `= ${section.result}` : "",
+        ].filter(Boolean).join("\n");
+      case "answer":
+        return [
+          section.label || "Final answer",
+          section.tex ? `$$${section.tex}$$` : "",
+          section.plain || "",
+        ].filter(Boolean).join("\n");
+      default:
+        return "";
+    }
+  }).filter(Boolean).join("\n\n");
+}
+
+export function buildFullSolutionReveal(plan, _sceneContext = null) {
+  const normalizedPlan = normalizeScenePlan(plan);
+  const sections = buildFullSolutionSections(normalizedPlan);
+  const serializedSections = serializeFullSolutionSections(sections);
+  const intro = `Let's work through the full solution for ${normalizedPlan.sourceSummary.cleanedQuestion || normalizedPlan.problem.question}.`;
+  return [
+    intro,
+    serializedSections || fullSolutionLines(normalizedPlan).join("\n\n"),
+    "Walk me through it in your own words.",
+  ].filter(Boolean).join("\n\n");
 }
 
 function buildVerdictInstructions(verdict, learningState = {}) {
   if (!verdict) return "";
 
-  const stuckCount = learningState?.stuckCount || 0;
+  const hintState = learningState?.hint_state || {};
+  const hintCount = hintState.current_stage_hints || 0;
 
   switch (verdict.verdict) {
     case "CORRECT":
@@ -119,19 +459,27 @@ Response rules for this turn:
 - Max 3 sentences total. This constraint is not optional.`;
 
     case "STUCK":
+      if (hintState?.escalate_next === true) {
+        return `
+
+=== EVALUATION RESULT: STUCK ===
+Escalation triggered: reveal the full worked solution now.
+- Give the worked solution clearly and directly.
+- End with exactly: "Walk me through it in your own words."`;
+      }
       return `
 
 === EVALUATION RESULT: STUCK ===
 Misconception type: ${verdict.misconception_type || "none identified"}
-Hint level: ${stuckCount + 1} (consecutive times stuck on this stage)
-Strategy: ${stuckStrategy(stuckCount)}
+Hint level: ${hintCount + 1} (consecutive times stuck on this stage)
+Strategy: ${stuckStrategy(hintCount)}
 
 Response rules for this turn:
-- Use the ${stuckStrategy(stuckCount)} strategy. Pick ONE approach only:
+- Use the ${stuckStrategy(hintCount)} strategy. Pick ONE approach only:
   - ANALOGY: if they're confused about the concept itself, relate it to something concrete
   - SIMPLER_QUESTION: break the current question into a smaller, answerable piece
   - SCENE_FOCUS: point them to a specific object or relationship visible in the scene
-- Keep it short. One question at the end. No answer.${stuckCount >= 2 ? "\n- Mention that they can tap 'View Solution' if they'd like to see the full worked solution." : ""}`;
+- Keep it short. One question at the end. No answer.${hintCount >= 2 ? "\n- Mention that they can tap 'View Solution' if they'd like to see the full worked solution." : ""}`;
 
     default:
       return "";
@@ -240,6 +588,9 @@ Conversation rules:
 
 export function buildFallbackTutorReply({ plan, assessment, sceneContext, userMessage, contextStepId }) {
   const normalizedPlan = normalizeScenePlan(plan);
+  if (sceneContext?.hint_state?.escalate_next === true) {
+    return buildFullSolutionReveal(normalizedPlan, sceneContext);
+  }
   const assessmentStepId = assessment?.summary?.currentStepId || null;
   const currentStep = normalizedPlan.buildSteps.find((step) => step.id === contextStepId)
     || normalizedPlan.buildSteps.find((step) => step.id === assessmentStepId)

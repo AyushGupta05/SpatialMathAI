@@ -246,13 +246,21 @@
 
               <div class="chat-composer">
                 <div class="chat-input-wrap">
-                  <button id="voiceRecordBtn" class="voice-mic-btn" type="button" aria-label="Voice input">&#127908;</button>
+                  <div id="voiceControl" class="voice-control">
+                    <div class="mic-ring" aria-hidden="true"></div>
+                    <button id="voiceRecordBtn" class="voice-mic-btn" type="button" aria-label="Voice input">&#127908;</button>
+                  </div>
                   <textarea
                     id="chatInput"
                     class="chat-input"
+                    data-composer-input
+                    data-default-placeholder="Ask anything about the scene..."
                     placeholder="What do you think happens next?"
                     rows="1"
                   ></textarea>
+                  <div id="voiceBars" class="voice-bars" style="display:none" aria-hidden="true">
+                    <span></span><span></span><span></span>
+                  </div>
                   <button id="chatSend" class="chat-send-btn" type="button">&#10148;</button>
                 </div>
                 <div id="chatMathPreview" class="composer-math-preview hidden" aria-live="polite"></div>

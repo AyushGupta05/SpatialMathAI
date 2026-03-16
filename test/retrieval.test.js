@@ -11,6 +11,8 @@ test("retrieveLessonExemplar uses stable fallback retrieval for a cylinder works
     },
   });
 
-  assert.equal(result.exemplar.id, "diagram-cylinder");
-  assert.ok(["default", "embeddings", "lexical"].includes(result.strategy));
+  assert.equal(result.exemplarId, "cylinder_volume");
+  assert.equal(result.matchedTitle, "Volume of a cylinder");
+  assert.equal(typeof result.score, "number");
+  assert.equal(result.why, "cylinder, radius");
 });

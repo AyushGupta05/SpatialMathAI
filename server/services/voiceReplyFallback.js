@@ -6,7 +6,7 @@ import { buildFallbackFreeformTurn, generateFreeformTutorTurn } from "./freeform
 import { converseWithModelFailover } from "./modelInvoker.js";
 import { evaluateTutorCompletion } from "./tutorCompletion.js";
 import { buildTutorResponseMeta } from "./tutorMetadata.js";
-import { buildTutorSystemPrompt, buildFallbackTutorReply } from "./tutorPrompt.js";
+import { buildTutorSystemPrompt, buildFallbackTutorReply, buildFullSolutionReveal } from "./tutorPrompt.js";
 import {
   buildNarrationPrompt,
   buildVoiceCoachPrompt,
@@ -129,6 +129,7 @@ function voiceMetaShape(meta = null) {
     actions: Array.isArray(meta?.actions) ? meta.actions : [],
     focusTargets: Array.isArray(meta?.focusTargets) ? meta.focusTargets : [],
     checkpoint: meta?.checkpoint || null,
+    nextLearningStage: meta?.nextLearningStage || null,
     stageStatus: meta?.stageStatus || null,
     completionState: meta?.completionState || null,
     sceneDirective: meta?.sceneDirective || null,
@@ -204,6 +205,7 @@ async function generateGuidedVoiceReply({
   learningState = {},
   contextStepId = null,
   userMessage = "",
+  requires_evaluation = true,
 }) {
   const assessment = evaluateBuild(plan, sceneSnapshot, contextStepId);
   const revealSolution = isExplicitSolutionRequest(userMessage);
@@ -222,7 +224,11 @@ async function generateGuidedVoiceReply({
       scene_cue: null,
       tutor_tone: "encouraging",
     };
-  } else if (!revealSolution && !isTrivialInteraction(learningState?.learningStage, userMessage)) {
+  } else if (
+    requires_evaluation !== false
+    && !revealSolution
+    && !isTrivialInteraction(learningState?.learningStage, userMessage)
+  ) {
     const currentStep = plan.buildSteps?.find((step) => step.id === contextStepId)
       || plan.buildSteps?.[learningState?.currentStep || 0];
     const stageGoal = currentStep?.focusConcept
@@ -245,9 +251,7 @@ async function generateGuidedVoiceReply({
 
   const completionState = numericCompletion.complete
     ? numericCompletion
-    : conceptVerdict?.verdict === "CORRECT"
-      ? { complete: true, reason: "correct-answer" }
-      : { complete: false, reason: null };
+    : { complete: false, reason: null };
 
   const meta = buildTutorResponseMeta({
     plan,
@@ -266,6 +270,11 @@ async function generateGuidedVoiceReply({
     assistantText = condenseForSpeech(
       buildSolutionRevealText(plan) || "I've opened the full solution. Follow the highlighted scene as you work through it."
     );
+  } else if (conceptVerdict?.verdict === "STUCK" && learningState?.hint_state?.escalate_next === true) {
+    assistantText = condenseForSpeech(buildFullSolutionReveal(plan, {
+      ...(sceneContext || {}),
+      hint_state: learningState?.hint_state || null,
+    }));
   } else {
     try {
       assistantText = await converseWithModelFailover(
@@ -349,6 +358,7 @@ async function generateCoachVoiceReply({
     learningState: context.learningState || {},
     contextStepId: context.contextStepId || null,
     userMessage,
+    requires_evaluation: context.requires_evaluation !== false,
   });
 }
 

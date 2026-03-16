@@ -19,6 +19,7 @@ import voiceRoute from "./routes/voice.js";
 import challengesRoute from "./routes/challenges.js";
 import buildRoute from "./routes/build.js";
 import capabilitiesRoute from "./routes/capabilities.js";
+import { warmLessonExemplars } from "./services/plan/retrieval.js";
 
 const app = new Hono();
 
@@ -65,6 +66,7 @@ async function findAvailablePort(startPort, attempts = 10) {
 }
 
 const PORT = await findAvailablePort(DEFAULT_PORT);
+void warmLessonExemplars();
 
 if (PORT !== DEFAULT_PORT) {
   console.warn(`Port ${DEFAULT_PORT} is busy, starting Nova Prism on ${PORT} instead.`);

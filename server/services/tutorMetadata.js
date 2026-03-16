@@ -189,7 +189,7 @@ export function buildTutorResponseMeta({
   const actions = completionState?.complete ? [] : stageActionsForReply(plan, stage, learningState, assessment);
   if (
     conceptVerdict?.verdict === "STUCK"
-    && (learningState?.stuckCount || 0) >= 2
+    && (learningState?.hint_state?.current_stage_hints || 0) >= 2
     && !actions.some((a) => a.kind === "reveal-full-solution")
   ) {
     actions.push({
@@ -202,6 +202,13 @@ export function buildTutorResponseMeta({
 
   return {
     actions,
+    escalation: learningState?.hint_state?.escalate_next
+      ? {
+        triggered: true,
+        hint_count: learningState.hint_state.current_stage_hints,
+        action: "full_solution_revealed",
+      }
+      : null,
     focusTargets: mergedFocusTargets,
     checkpoint: completionState?.complete
       ? null

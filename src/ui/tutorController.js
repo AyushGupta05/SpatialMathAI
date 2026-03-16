@@ -12,7 +12,7 @@ import {
 } from "../ai/client.js";
 import { buildSceneSnapshotFromSuggestions, normalizeScenePlan } from "../ai/planSchema.js";
 import { computeGeometry } from "../core/geometry.js";
-import { buildSolutionRevealText, formatPlanFinalAnswer, isExplicitSolutionRequest } from "../core/tutorSolution.js";
+import { buildSolutionRevealText, formatPlanFinalAnswer } from "../core/tutorSolution.js";
 import { initLabelRenderer, renderLabels, addLabel, clearLabels } from "../render/labels.js";
 import { AnalyticOverlayManager } from "../render/analyticOverlayManager.js";
 import { CameraDirector } from "../render/cameraDirector.js";
@@ -24,12 +24,18 @@ import { initUnfoldDrawer, setUnfoldRepresentationMode, syncUnfoldDrawer } from 
 import { hasMathMarkup, renderMathBlockHtml, renderRichTextHtml } from "./mathMarkup.js";
 import { MicrophoneCapture } from "./microphoneCapture.js";
 import { PcmAudioPlayer } from "./pcmAudioPlayer.js";
+import { hideEvidence, initEvidencePanel, registerEvidenceAutoClose, showEvidence } from "./evidencePanel.js";
 import { extractPastedQuestionImageFile } from "./questionImage.js";
 import {
   buildSuggestedQuestionActions,
   normalizeTutorReplyText,
   shouldStartLessonFromComposer,
 } from "./tutorConversation.js";
+import { dispatchTTS } from "./voiceController.js";
+
+let awaitingLearnerResponse = false;
+let lastInputSource = "text";
+let accumulatedTutorText = "";
 
 let world = null;
 let sceneApi = null;
@@ -52,6 +58,8 @@ let voiceUserSpeaking = false;
 let voiceSessionState = "idle";
 let voiceBufferedChunks = [];
 let voiceAssistantBargeInUnlockAt = 0;
+let lastVoiceAssessment = null;
+let lastVoiceTranscript = "";
 let lastAnnouncedStageKey = null;
 let lastCheckpointKey = null;
 let analyticOverlayManager = null;
@@ -82,7 +90,9 @@ let chatMessages;
 let chatInput;
 let chatSend;
 let chatMathPreview;
+let voiceControl;
 let voiceRecordBtn;
+let voiceBars;
 let voiceStatus;
 let stageRail;
 let stageRailProgress;
@@ -341,6 +351,18 @@ function setVoiceButtonState({ active = voiceModeEnabled, disabled = false } = {
   voiceRecordBtn.setAttribute("aria-label", active ? "Turn voice mode off" : "Turn voice mode on");
 }
 
+function updateVoiceVisualState(state = "idle") {
+  if (voiceControl) {
+    voiceControl.classList.remove("voice--listening", "voice--processing", "voice--responding");
+    if (state !== "idle") {
+      voiceControl.classList.add(`voice--${state}`);
+    }
+  }
+  if (voiceBars) {
+    voiceBars.style.display = state === "responding" ? "flex" : "none";
+  }
+}
+
 function ensureVoiceAudioPlayer() {
   if (!voiceAudioPlayer) {
     voiceAudioPlayer = new PcmAudioPlayer({ sampleRate: 24000 });
@@ -391,6 +413,7 @@ function setVoiceTranscript(content = "") {
   const draft = currentVoiceDraft();
   const transcript = String(content || "").trim();
   draft.inputTranscript = transcript;
+  lastVoiceTranscript = transcript;
   if (!transcript) return;
   if (!draft.userMessage) {
     draft.userMessage = addTranscriptMessage("user", transcript);
@@ -549,6 +572,34 @@ function currentLessonStage(plan = activePlan()) {
     || plan.lessonStages[Math.min(tutorState.currentStep, plan.lessonStages.length - 1)]
     || plan.lessonStages[0]
     || null;
+}
+
+function learningMomentStage(stageKey, plan = activePlan()) {
+  if (!plan || !stageKey) return null;
+  const moment = plan.learningMoments?.[stageKey] || {};
+  return {
+    id: `${stageKey}-stage`,
+    learningStage: stageKey,
+    title: moment.title || stageKey,
+    goal: moment.goal || "",
+    checkpointPrompt: moment.prompt || "",
+    checkpoint: moment.prompt ? { prompt: moment.prompt } : null,
+    requires_evaluation: ["predict", "check", "reflect"].includes(stageKey),
+  };
+}
+
+function getCurrentStage(plan = activePlan()) {
+  if (!plan) return null;
+  if (["predict", "check", "reflect", "challenge"].includes(tutorState.learningStage)) {
+    return learningMomentStage(tutorState.learningStage, plan);
+  }
+  const lessonStage = currentLessonStage(plan);
+  if (!lessonStage) return null;
+  return {
+    ...lessonStage,
+    learningStage: lessonStage.learningStage || tutorState.learningStage,
+    checkpoint: lessonStage.checkpoint || (lessonStage.checkpointPrompt ? { prompt: lessonStage.checkpointPrompt } : null),
+  };
 }
 
 function currentStageIndex(plan = activePlan()) {
@@ -729,7 +780,7 @@ function buildStageIntroMessage(plan = activePlan(), assessment = tutorState.lat
 function updateComposerState() {
   const hasPlan = Boolean(activePlan());
   if (chatInput) {
-    chatInput.disabled = false;
+    chatInput.disabled = !awaitingLearnerResponse;
     if (!hasPlan) {
       chatInput.placeholder = "Chat, ask about the scene, or say 'show me something cool'";
     } else if (isLessonComplete()) {
@@ -740,8 +791,8 @@ function updateComposerState() {
       chatInput.placeholder = "What do you think happens next?";
     }
   }
-  if (chatSend) chatSend.disabled = false;
-  setVoiceButtonState({ active: voiceModeEnabled, disabled: false });
+  if (chatSend) chatSend.disabled = !awaitingLearnerResponse;
+  setVoiceButtonState({ active: voiceModeEnabled, disabled: !awaitingLearnerResponse });
 }
 
 function setCheckpointState(checkpoint = null) {
@@ -812,6 +863,316 @@ function completeLesson({ reason = "correct-answer", revealSolution = false } = 
   void fetchSimilarQuestionsOnce();
 }
 
+function normalizeSolutionText(value = "") {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function formatSolutionNumber(value, digits = 2) {
+  const next = Number(value);
+  if (!Number.isFinite(next)) return "0";
+  const rounded = Number(next.toFixed(digits));
+  return Number.isInteger(rounded)
+    ? String(rounded)
+    : rounded.toFixed(digits).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function solutionSourceText(plan = activePlan()) {
+  const givens = Array.isArray(plan?.sourceSummary?.givens) ? plan.sourceSummary.givens : [];
+  return [
+    plan?.sourceSummary?.cleanedQuestion,
+    plan?.problem?.question,
+    ...givens,
+  ].filter(Boolean).join(" ");
+}
+
+function parsePointMap(text = "") {
+  const points = new Map();
+  const pointPattern = /\b([A-Z])\s*\(\s*([-+]?\d*\.?\d+(?:\s*,\s*[-+]?\d*\.?\d+){2})\s*\)/g;
+  let match = pointPattern.exec(text);
+  while (match) {
+    const label = match[1];
+    const coordinates = match[2]
+      .split(/\s*,\s*/)
+      .map((value) => Number(value));
+    if (coordinates.length === 3 && coordinates.every((value) => Number.isFinite(value))) {
+      points.set(label, coordinates);
+    }
+    match = pointPattern.exec(text);
+  }
+  return points;
+}
+
+function parseVectorLabels(text = "") {
+  const patterns = [
+    /angle between (?:two |the )?(?:vectors?|lines?)\s+([A-Z]{2})\s*(?:,|and)\s*([A-Z]{2})/i,
+    /vectors?\s+([A-Z]{2})\s*(?:,|and)\s*([A-Z]{2})/i,
+    /lines?\s+([A-Z]{2})\s*(?:,|and)\s*([A-Z]{2})/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match) {
+      return [match[1].toUpperCase(), match[2].toUpperCase()];
+    }
+  }
+
+  return [null, null];
+}
+
+function vectorFromPoints(start = [], end = []) {
+  if (!Array.isArray(start) || !Array.isArray(end) || start.length !== 3 || end.length !== 3) {
+    return null;
+  }
+  return end.map((value, index) => Number(value) - Number(start[index]));
+}
+
+function parenthesizedValueTex(value) {
+  const formatted = formatSolutionNumber(value);
+  return Number(value) < 0 ? `(${formatted})` : formatted;
+}
+
+function tupleTex(values = []) {
+  return `(${values.map((value) => formatSolutionNumber(value)).join(", ")})`;
+}
+
+function tuplePlain(values = []) {
+  return `(${values.map((value) => formatSolutionNumber(value)).join(", ")})`;
+}
+
+function differenceTupleTex(start = [], end = []) {
+  return `(${end.map((value, index) => `${formatSolutionNumber(value)}-${parenthesizedValueTex(start[index])}`).join(", ")})`;
+}
+
+function squaredTermsTex(values = []) {
+  return values.map((value) => `${parenthesizedValueTex(value)}^2`).join(" + ");
+}
+
+function squaredValuesTex(values = []) {
+  return values.map((value) => formatSolutionNumber(Number(value) ** 2)).join(" + ");
+}
+
+function signedTermsTex(values = []) {
+  return values.map((value, index) => {
+    const formatted = formatSolutionNumber(Math.abs(Number(value)));
+    if (index === 0) {
+      return Number(value) < 0 ? `-${formatted}` : formatted;
+    }
+    return Number(value) < 0 ? `- ${formatted}` : `+ ${formatted}`;
+  }).join(" ");
+}
+
+function vectorLabelTex(label = "") {
+  return `\\overrightarrow{${label}}`;
+}
+
+function angleAnswerTex(angleDegrees) {
+  return `\\theta = ${formatSolutionNumber(angleDegrees)}^\\circ`;
+}
+
+function buildLineLineSolutionSections(plan = activePlan()) {
+  const sourceText = solutionSourceText(plan);
+  const relationships = Array.isArray(plan?.sourceSummary?.relationships) ? plan.sourceSummary.relationships : [];
+  const looksLikeLineLine = relationships.includes("angle_type:line_line")
+    || /angle between (?:two |the )?(?:vectors?|lines?)/i.test(sourceText)
+    || /vectors?\s+[A-Z]{2}\s*(?:,|and)\s*[A-Z]{2}/i.test(sourceText);
+
+  if (!looksLikeLineLine) return [];
+
+  const points = parsePointMap(sourceText);
+  const [vectorOneLabel, vectorTwoLabel] = parseVectorLabels(sourceText);
+  if (!vectorOneLabel || !vectorTwoLabel) return [];
+
+  const [startOneLabel, endOneLabel] = vectorOneLabel.split("");
+  const [startTwoLabel, endTwoLabel] = vectorTwoLabel.split("");
+  const startOne = points.get(startOneLabel);
+  const endOne = points.get(endOneLabel);
+  const startTwo = points.get(startTwoLabel);
+  const endTwo = points.get(endTwoLabel);
+  if (!startOne || !endOne || !startTwo || !endTwo) return [];
+
+  const vectorOne = vectorFromPoints(startOne, endOne);
+  const vectorTwo = vectorFromPoints(startTwo, endTwo);
+  if (!vectorOne || !vectorTwo) return [];
+
+  const dotTerms = vectorOne.map((value, index) => Number(value) * Number(vectorTwo[index]));
+  const dotProduct = dotTerms.reduce((total, value) => total + value, 0);
+  const vectorOneSquareSum = vectorOne.reduce((total, value) => total + (Number(value) ** 2), 0);
+  const vectorTwoSquareSum = vectorTwo.reduce((total, value) => total + (Number(value) ** 2), 0);
+  const vectorOneMagnitude = Math.sqrt(vectorOneSquareSum);
+  const vectorTwoMagnitude = Math.sqrt(vectorTwoSquareSum);
+  const denominator = vectorOneMagnitude * vectorTwoMagnitude;
+  if (!denominator) return [];
+
+  const cosineValue = Math.max(-1, Math.min(1, dotProduct / denominator));
+  const angleDegrees = (Math.acos(cosineValue) * 180) / Math.PI;
+  const angleText = formatSolutionNumber(angleDegrees);
+  const isPerpendicular = Math.abs(cosineValue) < 1e-9;
+
+  return [
+    {
+      type: "prose",
+      text: `We need to find the angle theta between vectors ${vectorOneLabel} and ${vectorTwoLabel} using the dot product.`,
+    },
+    {
+      type: "formula",
+      label: "Formula",
+      tex: `\\theta = \\arccos\\left(\\frac{${vectorLabelTex(vectorOneLabel)} \\cdot ${vectorLabelTex(vectorTwoLabel)}}{|${vectorLabelTex(vectorOneLabel)}|\\,|${vectorLabelTex(vectorTwoLabel)}|}\\right)`,
+    },
+    {
+      type: "step",
+      label: "Step 1",
+      description: `Find vector ${vectorOneLabel}`,
+      tex: `${vectorLabelTex(vectorOneLabel)} = ${endOneLabel} - ${startOneLabel} = ${differenceTupleTex(startOne, endOne)} = ${tupleTex(vectorOne)}`,
+      result: tuplePlain(vectorOne),
+    },
+    {
+      type: "step",
+      label: "Step 2",
+      description: `Find vector ${vectorTwoLabel}`,
+      tex: `${vectorLabelTex(vectorTwoLabel)} = ${endTwoLabel} - ${startTwoLabel} = ${differenceTupleTex(startTwo, endTwo)} = ${tupleTex(vectorTwo)}`,
+      result: tuplePlain(vectorTwo),
+    },
+    {
+      type: "step",
+      label: "Step 3",
+      description: `Compute ${vectorOneLabel} dot ${vectorTwoLabel}`,
+      tex: `${vectorLabelTex(vectorOneLabel)} \\cdot ${vectorLabelTex(vectorTwoLabel)} = ${vectorOne.map((value, index) => `(${formatSolutionNumber(value)})(${formatSolutionNumber(vectorTwo[index])})`).join(" + ")} = ${signedTermsTex(dotTerms)} = ${formatSolutionNumber(dotProduct)}`,
+      result: formatSolutionNumber(dotProduct),
+    },
+    {
+      type: "step",
+      label: "Step 4",
+      description: `Compute |${vectorOneLabel}|`,
+      tex: `|${vectorLabelTex(vectorOneLabel)}| = \\sqrt{${squaredTermsTex(vectorOne)}} = \\sqrt{${squaredValuesTex(vectorOne)}} = \\sqrt{${formatSolutionNumber(vectorOneSquareSum)}}`,
+      result: `sqrt(${formatSolutionNumber(vectorOneSquareSum)}) approx ${formatSolutionNumber(vectorOneMagnitude)}`,
+    },
+    {
+      type: "step",
+      label: "Step 5",
+      description: `Compute |${vectorTwoLabel}|`,
+      tex: `|${vectorLabelTex(vectorTwoLabel)}| = \\sqrt{${squaredTermsTex(vectorTwo)}} = \\sqrt{${squaredValuesTex(vectorTwo)}} = \\sqrt{${formatSolutionNumber(vectorTwoSquareSum)}}`,
+      result: `sqrt(${formatSolutionNumber(vectorTwoSquareSum)}) approx ${formatSolutionNumber(vectorTwoMagnitude)}`,
+    },
+    {
+      type: "step",
+      label: "Step 6",
+      description: "Apply the formula",
+      tex: `\\theta = \\arccos\\left(\\frac{${formatSolutionNumber(dotProduct)}}{\\sqrt{${formatSolutionNumber(vectorOneSquareSum)}} \\cdot \\sqrt{${formatSolutionNumber(vectorTwoSquareSum)}}}\\right) = \\arccos(${formatSolutionNumber(cosineValue)}) = ${angleText}^\\circ`,
+      result: `${angleText} degrees`,
+    },
+    {
+      type: "answer",
+      label: "Final answer",
+      tex: angleAnswerTex(angleDegrees),
+      plain: isPerpendicular
+        ? `theta = ${angleText} degrees (the vectors are perpendicular)`
+        : `theta = ${angleText} degrees`,
+    },
+  ];
+}
+
+function buildGenericSolutionSections(plan = activePlan()) {
+  if (!plan) return [];
+
+  const analytic = plan.analyticContext || {};
+  const finalAnswer = formatPlanFinalAnswer(plan);
+  const sections = [];
+  const questionText = normalizeSolutionText(plan?.sourceSummary?.cleanedQuestion || plan?.problem?.question || "");
+  const formulaText = normalizeSolutionText(analytic.formulaCard?.formula || plan?.answerScaffold?.formula || "");
+
+  if (questionText) {
+    sections.push({
+      type: "prose",
+      text: `We need to solve: ${questionText}`,
+    });
+  }
+
+  if (formulaText) {
+    sections.push({
+      type: "formula",
+      label: "Formula",
+      tex: formulaText,
+    });
+  }
+
+  (analytic.solutionSteps || []).forEach((step, index) => {
+    const tex = normalizeSolutionText(step?.formula || "");
+    const description = normalizeSolutionText(step?.explanation || step?.title || "");
+    if (!tex && !description) return;
+    sections.push({
+      type: "step",
+      label: `Step ${index + 1}`,
+      description: description || `Work through ${step?.title || `step ${index + 1}`}.`,
+      tex,
+      result: null,
+    });
+  });
+
+  if (finalAnswer.text) {
+    sections.push({
+      type: "answer",
+      label: "Final answer",
+      tex: finalAnswer.text,
+      plain: `Final answer: ${finalAnswer.text}`,
+    });
+  }
+
+  return sections;
+}
+
+function solutionSectionsForPlan(plan = activePlan()) {
+  const lineLineSections = buildLineLineSolutionSections(plan);
+  if (lineLineSections.length) return lineLineSections;
+  return buildGenericSolutionSections(plan);
+}
+
+function renderSolutionSections(sections = []) {
+  return sections.map((section) => {
+    switch (section.type) {
+      case "prose":
+        return `<p class="solution-prose">${renderRichTextHtml(section.text || "")}</p>`;
+
+      case "formula":
+        return `
+          <div class="formula-card">
+            <span class="formula-label">${escapeHtml(section.label || "Formula")}</span>
+            <div class="formula-display">
+              ${renderMathBlockHtml(section.tex || "", { displayMode: true })}
+            </div>
+          </div>
+        `;
+
+      case "step":
+        return `
+          <div class="solution-step">
+            <span class="step-label">${escapeHtml(section.label || "Step")}</span>
+            <span class="step-description">${escapeHtml(section.description || "")}</span>
+            ${section.tex
+              ? `<div class="step-math">${renderMathBlockHtml(section.tex, { displayMode: true })}</div>`
+              : ""}
+            ${section.result
+              ? `<span class="step-result">= ${escapeHtml(section.result)}</span>`
+              : ""}
+          </div>
+        `;
+
+      case "answer":
+        return `
+          <div class="solution-answer">
+            <span class="answer-label">${escapeHtml(section.label || "Final answer")}</span>
+            <div class="answer-math">
+              ${renderMathBlockHtml(section.tex || section.plain || "", { displayMode: true })}
+            </div>
+            ${section.plain ? `<span class="step-result">${escapeHtml(section.plain)}</span>` : ""}
+          </div>
+        `;
+
+      default:
+        return "";
+    }
+  }).join("");
+}
+
 function revealWorkedSolution(plan = activePlan(), { announceInTranscript = true } = {}) {
   if (!plan) return;
 
@@ -867,35 +1228,11 @@ function renderAnalyticPanels(plan = activePlan()) {
 
   if (showSolutionDrawer && solutionDrawerTitle && solutionDrawerSteps) {
     solutionDrawerTitle.textContent = analytic.formulaCard?.title || "Worked Solution";
-    const finalAnswer = formatPlanFinalAnswer(plan);
     if (solutionDrawerAnswer && solutionDrawerAnswerValue) {
-      solutionDrawerAnswer.classList.toggle("hidden", !finalAnswer.text);
-      solutionDrawerAnswerValue.innerHTML = finalAnswer.text
-        ? renderMathBlockHtml(finalAnswer.text, { displayMode: true })
-        : "";
+      solutionDrawerAnswer.classList.add("hidden");
+      solutionDrawerAnswerValue.innerHTML = "";
     }
-    solutionDrawerSteps.innerHTML = "";
-    (analytic.solutionSteps || []).forEach((step, index) => {
-      const item = document.createElement("div");
-      item.className = "solution-step";
-      const stepIndex = document.createElement("p");
-      stepIndex.className = "solution-step-index";
-      stepIndex.textContent = `Step ${index + 1}`;
-
-      const heading = document.createElement("h4");
-      heading.textContent = step.title;
-
-      const formula = document.createElement("div");
-      formula.className = "solution-step-formula";
-      formula.innerHTML = renderMathBlockHtml(step.formula || "", { displayMode: true });
-
-      const copy = document.createElement("div");
-      copy.className = "solution-step-copy";
-      copy.innerHTML = renderRichTextHtml(step.explanation || "");
-
-      item.append(stepIndex, heading, formula, copy);
-      solutionDrawerSteps.appendChild(item);
-    });
+    solutionDrawerSteps.innerHTML = renderSolutionSections(solutionSectionsForPlan(plan));
   }
 }
 
@@ -1406,6 +1743,7 @@ async function handleQuestionSubmit(overrides = {}) {
   similarQuestionRequest = null;
   lastCompletionPromptKey = null;
   analyticOverlayManager?.clear();
+  hideEvidence();
   renderAnalyticPanels(null);
   if (questionSubmit) questionSubmit.disabled = true;
   setQuestionStatus("Building a staged lesson from your prompt and scene...", "loading");
@@ -1416,6 +1754,15 @@ async function handleQuestionSubmit(overrides = {}) {
       imageFile,
       mode: "guided",
       sceneSnapshot: currentSnapshot(),
+      callbacks: {
+        onMultimodalEvidence: async (data) => {
+          showEvidence({
+            ...data,
+            _imageUrl: imageFile ? questionImagePreviewUrl : null,
+          });
+          registerEvidenceAutoClose();
+        },
+      },
     });
     setPlan(scenePlan);
     setQuestionStatus("", "hidden");
@@ -1455,6 +1802,105 @@ function sceneContextPayload(plan, assessment) {
     fullSolutionVisible: analyticFullSolutionVisible,
     lastSceneFeedback,
   };
+}
+
+function buildTutorPayload(messageText = "") {
+  const plan = activePlan();
+  return {
+    plan,
+    sceneSnapshot: currentSnapshot(),
+    sceneContext: sceneContextPayload(plan, tutorState.latestAssessment),
+    learningState: tutorState.snapshot(),
+    userMessage: String(messageText || "").trim(),
+    contextStepId: tutorState.getCurrentStep()?.id || null,
+  };
+}
+
+async function handleLearnerInput(text, options = {}) {
+  const {
+    input_source = "text",
+    skip_server_call = false,
+    user_label = null,
+    show_user_message = true,
+  } = options;
+  const normalizedText = String(text || "").trim();
+
+  if (!normalizedText || !awaitingLearnerResponse) return;
+
+  awaitingLearnerResponse = false;
+  lastInputSource = input_source;
+  accumulatedTutorText = "";
+  chatInput?.classList.remove("input--awaiting");
+
+  if (chatInput) chatInput.disabled = true;
+  if (chatSend) chatSend.disabled = true;
+  setVoiceButtonState({ active: voiceModeEnabled, disabled: true });
+
+  if (skip_server_call) return;
+
+  if (tutorState.learningStage === "predict") {
+    tutorState.submitPrediction(normalizedText);
+  }
+
+  const payload = buildTutorPayload(normalizedText);
+  const currentStage = getCurrentStage();
+  const requiresEval = currentStage?.requires_evaluation ?? true;
+  payload.requires_evaluation = requiresEval;
+  payload.input_source = input_source;
+  payload.hint_state = { ...(tutorState.hint_state || {}) };
+
+  await sendTutorMessage(payload, {
+    userLabel: user_label,
+    showUserMessage: show_user_message,
+  });
+}
+
+function returnControlToLearner(context = {}) {
+  if (awaitingLearnerResponse) return;
+  awaitingLearnerResponse = true;
+
+  if (chatInput) {
+    chatInput.disabled = false;
+    chatInput.focus();
+  }
+  if (chatSend) chatSend.disabled = false;
+  setVoiceButtonState({ active: voiceModeEnabled, disabled: false });
+
+  const placeholders = {
+    CORRECT: "What do you think about the next step?",
+    PARTIAL: "Have another go \u2014 what do you think now?",
+    STUCK: "Take your time \u2014 what are you seeing?",
+  };
+  const defaultPlaceholder = chatInput?.getAttribute("data-default-placeholder")
+    ?? "Ask anything about the scene...";
+
+  let placeholder = defaultPlaceholder;
+  if (context.verdict && placeholders[context.verdict]) {
+    placeholder = placeholders[context.verdict];
+  }
+  if (
+    context.verdict === "STUCK"
+    && tutorState?.hint_state?.escalate_next === true
+  ) {
+    placeholder = "Walk me through it in your own words.";
+  }
+  if (context.verdict === "CORRECT" && context.stage) {
+    const checkpointPrompt = context.stage.checkpoint?.prompt || context.stage.checkpointPrompt || "";
+    if (checkpointPrompt) {
+      placeholder = checkpointPrompt.length > 80
+        ? `${checkpointPrompt.slice(0, 77)}...`
+        : checkpointPrompt;
+    }
+  }
+  if (chatInput) chatInput.placeholder = placeholder;
+
+  chatInput?.classList.add("input--awaiting");
+
+  if (lastInputSource === "voice" && accumulatedTutorText) {
+    dispatchTTS(accumulatedTutorText).catch((error) => {
+      console.warn("Sonic TTS failed:", error);
+    });
+  }
 }
 
 function beginGuidedBuild() {
@@ -1509,6 +1955,17 @@ function syncStepFromTutorResponse(response = {}, plan = activePlan()) {
   }
 }
 
+function syncLearningStageFromTutorResponse(response = {}, plan = activePlan()) {
+  const nextLearningStage = response.nextLearningStage || response.assessment?.nextLearningStage || null;
+  if (!nextLearningStage || nextLearningStage === tutorState.learningStage) {
+    return;
+  }
+  tutorState.setLearningStage(nextLearningStage);
+  if (nextLearningStage === "predict") {
+    tutorState.resetPrediction(plan?.learningMoments?.predict?.prompt || "");
+  }
+}
+
 function applyVoiceTurnResult(response = {}, plan = activePlan()) {
   const draft = voiceStreamDraft;
   const inputTranscript = String(response.inputTranscript || "").trim();
@@ -1522,6 +1979,7 @@ function applyVoiceTurnResult(response = {}, plan = activePlan()) {
   }
 
   syncStepFromTutorResponse(response, plan);
+  syncLearningStageFromTutorResponse(response, plan);
 
   if (response.conceptVerdict) {
     tutorState.addVerdict({
@@ -1584,8 +2042,11 @@ function applyVoiceTurnResult(response = {}, plan = activePlan()) {
 }
 
 async function sendTutorMessage(messageText, options = {}) {
-  const plan = activePlan();
-  const text = messageText?.trim();
+  const payload = messageText && typeof messageText === "object" && "userMessage" in messageText
+    ? { ...messageText }
+    : buildTutorPayload(messageText);
+  const plan = payload.plan || activePlan();
+  const text = String(payload.userMessage || "").trim();
   if (!text) return;
 
   if (options.showUserMessage !== false) {
@@ -1596,130 +2057,147 @@ async function sendTutorMessage(messageText, options = {}) {
   const typing = addTranscriptMessage("tutor", "...");
   typing?.classList.add("loading-dots");
   let streamedText = "";
+  let pendingVerdict = null;
+  let pendingStage = null;
+  let pendingLearningStage = null;
 
   try {
-    const response = await askTutor({
-      plan,
-      sceneSnapshot: currentSnapshot(),
-      sceneContext: sceneContextPayload(plan, tutorState.latestAssessment),
-      learningState: tutorState.snapshot(),
-      userMessage: text,
-      contextStepId: tutorState.getCurrentStep()?.id || null,
+    await askTutor({
+      ...payload,
       onChunk: (chunk) => {
         streamedText += chunk;
+        accumulatedTutorText += chunk;
         typing?.classList.remove("loading-dots");
         setTranscriptMessageText(typing, streamedText, { role: "tutor", completion: false });
       },
       onAssessment: (assessment) => {
-        tutorState.setAssessment(assessment);
-        renderAssessment(assessment);
+        if (assessment?.summary) {
+          tutorState.setAssessment(assessment);
+          renderAssessment(assessment);
+          renderSceneInfo();
+          updateStageRail();
+        }
+        pendingVerdict = assessment?.verdict ?? null;
+        pendingStage = assessment?.nextStage ?? null;
+        pendingLearningStage = assessment?.nextLearningStage ?? null;
+      },
+      onDone: async ({ text: finalText, assessment, meta } = {}) => {
+        const response = {
+          text: finalText || streamedText || "I could not generate a tutor reply.",
+          assessment,
+          nextLearningStage: pendingLearningStage,
+          ...(meta || {}),
+        };
+        const conceptVerdict = response.conceptVerdict || (pendingVerdict
+          ? {
+            verdict: pendingVerdict,
+            what_was_right: "",
+            gap: null,
+            misconception_type: null,
+          }
+          : null);
+        const verdict = conceptVerdict?.verdict || pendingVerdict || null;
+
+        typing?.classList.remove("loading-dots");
+        if (typing) {
+          typing.dataset.completion = response.completionState?.complete ? "true" : "false";
+        }
+        setTranscriptMessageText(typing, response.text, {
+          role: "tutor",
+          completion: Boolean(response.completionState?.complete),
+        });
+
+        syncStepFromTutorResponse(response, plan);
+        syncLearningStageFromTutorResponse(response, plan);
+
+        if (conceptVerdict?.verdict) {
+          tutorState.addVerdict({
+            stage: tutorState.learningStage,
+            stageGoal: conceptVerdict.stageGoal || "",
+            verdict: conceptVerdict.verdict,
+            what_was_right: conceptVerdict.what_was_right,
+            gap: conceptVerdict.gap,
+            misconception_type: conceptVerdict.misconception_type,
+          });
+        }
+
+        if (response.completionState?.complete) {
+          completeLesson({
+            reason: response.completionState.reason || "correct-answer",
+            revealSolution: response.completionState.reason === "revealed-solution" || Boolean(response.sceneDirective?.revealFullSolution),
+          });
+        }
+
+        const actions = response.actions?.length ? response.actions : stageActionsForClient(plan, tutorState.latestAssessment);
+        renderMessageActions(typing, actions);
+        tutorState.addMessage("assistant", response.text);
+
+        if (response.assessment?.summary) {
+          tutorState.setAssessment(response.assessment);
+        } else if (!plan) {
+          tutorState.setAssessment(null);
+        }
+        if (response.focusTargets?.length) {
+          focusStageTargets(response.focusTargets, { selectFirst: true });
+        }
+        if (response.checkpoint && !isLessonComplete()) {
+          setCheckpointState(response.checkpoint);
+        } else {
+          setCheckpointState(null);
+        }
+        if (response.sceneDirective) {
+          applySceneDirective(response.sceneDirective, { forceCamera: true });
+        }
+        if (response.sceneCommand) {
+          applyAssistantSceneCommand(response.sceneCommand);
+        }
+
+        lastSceneFeedback = response.text || lastSceneFeedback;
+        renderAssessment(plan ? tutorState.latestAssessment : null);
         renderSceneInfo();
         updateStageRail();
+        if (plan && !isLessonComplete()) {
+          announceCurrentStage();
+        }
+
+        returnControlToLearner({
+          verdict,
+          stage: pendingStage,
+        });
+        pendingVerdict = null;
+        pendingStage = null;
+        pendingLearningStage = null;
       },
     });
-
-    typing?.classList.remove("loading-dots");
-    if (typing) {
-      typing.dataset.completion = response.completionState?.complete ? "true" : "false";
-    }
-    setTranscriptMessageText(typing, response.text || streamedText || "I could not generate a tutor reply.", {
-      role: "tutor",
-      completion: Boolean(response.completionState?.complete),
-    });
-    syncStepFromTutorResponse(response, plan);
-
-    if (response.conceptVerdict) {
-      tutorState.addVerdict({
-        stage: tutorState.learningStage,
-        stageGoal: response.conceptVerdict.stageGoal || "",
-        verdict: response.conceptVerdict.verdict,
-        what_was_right: response.conceptVerdict.what_was_right,
-        gap: response.conceptVerdict.gap,
-        misconception_type: response.conceptVerdict.misconception_type,
-      });
-    }
-
-    if (response.completionState?.complete) {
-      completeLesson({
-        reason: response.completionState.reason || "correct-answer",
-        revealSolution: response.completionState.reason === "revealed-solution" || Boolean(response.sceneDirective?.revealFullSolution),
-      });
-    }
-
-    const actions = response.actions?.length ? response.actions : stageActionsForClient(plan, tutorState.latestAssessment);
-    renderMessageActions(typing, actions);
-    tutorState.addMessage("assistant", response.text || streamedText || "I could not generate a tutor reply.");
-
-    if (response.assessment) {
-      tutorState.setAssessment(response.assessment);
-    } else if (!plan) {
-      tutorState.setAssessment(null);
-    }
-    if (response.focusTargets?.length) {
-      focusStageTargets(response.focusTargets, { selectFirst: true });
-    }
-    if (response.checkpoint && !isLessonComplete()) {
-      setCheckpointState(response.checkpoint);
-    } else if (!plan) {
-      setCheckpointState(null);
-    } else if (isLessonComplete()) {
-      setCheckpointState(null);
-    }
-    if (response.sceneDirective) {
-      applySceneDirective(response.sceneDirective, { forceCamera: true });
-    }
-    if (response.sceneCommand) {
-      applyAssistantSceneCommand(response.sceneCommand);
-    }
-
-    lastSceneFeedback = response.text || lastSceneFeedback;
-    renderAssessment(plan ? tutorState.latestAssessment : null);
-    renderSceneInfo();
-    updateStageRail();
-    if (plan && !isLessonComplete()) {
-      announceCurrentStage();
-    }
   } catch (error) {
     typing?.classList.remove("loading-dots");
     setTranscriptMessageText(typing, `Error: ${error.message}`, { role: "tutor", completion: false });
+    awaitingLearnerResponse = true;
+    if (chatInput) {
+      chatInput.disabled = false;
+      chatInput.focus();
+    }
+    if (chatSend) chatSend.disabled = false;
+    setVoiceButtonState({ active: voiceModeEnabled, disabled: false });
   }
 }
 
 async function handleExplain() {
-  await sendTutorMessage(`I'm stuck. Give me a small hint about what to focus on in the scene, without giving me the answer.`, {
-    userLabel: "I need a hint",
+  await handleLearnerInput(`I'm stuck. Give me a small hint about what to focus on in the scene, without giving me the answer.`, {
+    input_source: "text",
+    user_label: "I need a hint",
   });
 }
 
 async function handleComposerSubmit() {
   const plan = activePlan();
+  if (!awaitingLearnerResponse) return;
   const text = chatInput?.value?.trim();
   if (!text) return;
 
   chatInput.value = "";
   updateMathPreview(chatMathPreview, "");
   resizeChatComposer();
-
-  if (tutorState.learningStage === "predict" && !tutorState.predictionState.submitted) {
-    tutorState.submitPrediction(text);
-    tutorState.setLearningStage("check");
-    lastSceneFeedback = "";
-    addTranscriptMessage("user", text);
-    addTranscriptMessage("tutor", "Interesting. Now look at the scene - does it match what you predicted?", {
-      actions: stageActionsForClient(plan),
-    });
-    setCheckpointState(null);
-    updateStageRail();
-    announceCurrentStage(true);
-    return;
-  }
-
-  if (plan && isExplicitSolutionRequest(text)) {
-    addTranscriptMessage("user", text);
-    tutorState.addMessage("user", text);
-    revealWorkedSolution(plan);
-    return;
-  }
 
   if (shouldStartLessonFromComposer({
     text,
@@ -1730,16 +2208,18 @@ async function handleComposerSubmit() {
     return;
   }
 
-  await sendTutorMessage(text);
+  await handleLearnerInput(text, { input_source: "text" });
 }
 
 function buildVoiceContext(plan = activePlan()) {
+  const currentStage = getCurrentStage(plan);
   return {
     plan,
     sceneSnapshot: currentSnapshot(),
     sceneContext: sceneContextPayload(plan, tutorState.latestAssessment),
     learningState: tutorState.snapshot(),
     contextStepId: tutorState.getCurrentStep()?.id || null,
+    requires_evaluation: currentStage?.requires_evaluation ?? false,
   };
 }
 
@@ -1748,6 +2228,7 @@ function standbyVoiceStatus() {
 }
 
 function setVoiceStatusForState(state = voiceSessionState) {
+  updateVoiceVisualState(state);
   if (state === "connecting") {
     updateVoiceStatus("Connecting voice session...", "ready");
     return;
@@ -1757,11 +2238,11 @@ function setVoiceStatusForState(state = voiceSessionState) {
     return;
   }
   if (state === "processing") {
-    updateVoiceStatus("Thinking...", "ready");
+    updateVoiceStatus(lastVoiceTranscript ? `Nova heard: ${lastVoiceTranscript}` : "Processing...", "ready");
     return;
   }
   if (state === "responding") {
-    updateVoiceStatus("Replying...", "ready");
+    updateVoiceStatus("Nova is responding...", "ready");
     return;
   }
   updateVoiceStatus(standbyVoiceStatus(), voiceModeEnabled ? "ready" : "hidden");
@@ -1773,8 +2254,17 @@ function handleVoiceSessionEvent(event = {}) {
       voiceSessionState = event.state || "idle";
       setVoiceStatusForState(voiceSessionState);
       return;
+    case "assessment":
+      lastVoiceAssessment = event;
+      return;
     case "input_transcript":
       setVoiceTranscript(event.content || "");
+      setVoiceStatusForState("processing");
+      void handleLearnerInput(event.content || "", {
+        input_source: "voice",
+        skip_server_call: true,
+        show_user_message: false,
+      });
       return;
     case "assistant_text":
       setVoiceAssistantMessage(event.content || "", {
@@ -1811,8 +2301,18 @@ function handleVoiceSessionEvent(event = {}) {
       voiceUserSpeaking = false;
       voiceAssistantBargeInUnlockAt = 0;
       applyVoiceTurnResult(event);
+      if (!currentVoiceDraft().assistantAudioStarted) {
+        accumulatedTutorText = event.assistantText || "";
+      }
       voiceStreamDraft = null;
       setVoiceStatusForState("idle");
+      returnControlToLearner({
+        verdict: lastVoiceAssessment?.verdict || event.conceptVerdict?.verdict || null,
+        stage: getCurrentStage(),
+      });
+      if (lastInputSource === "voice") {
+        document.dispatchEvent(new CustomEvent("demo:voice-turn-complete"));
+      }
       return;
     default:
       return;
@@ -1895,13 +2395,16 @@ async function startVoiceConversationTurn() {
   voiceTurnStartPromise = (async () => {
     try {
       const sessionId = await ensureVoiceSessionConnected();
+      lastVoiceAssessment = null;
       resetVoiceDraft();
       voiceAudioUploadChain = Promise.resolve();
+      const voiceContext = buildVoiceContext();
       const sessionStart = await startVoiceSessionTurn({
         sessionId,
         mode: "coach",
-        context: buildVoiceContext(),
+        context: voiceContext,
         playbackMode: "auto",
+        requires_evaluation: voiceContext.requires_evaluation ?? false,
       });
       if (sessionStart.fallbackUsed) {
         updateVoiceStatus("Voice replied in captions.", "ready");
@@ -2123,8 +2626,9 @@ function advanceLessonStage() {
 async function handleTutorAction(action = {}) {
   switch (action.kind) {
     case "freeform-prompt":
-      await sendTutorMessage(action.payload?.prompt || action.label || "Show me something interesting.", {
-        userLabel: action.label || action.payload?.prompt || "Try that",
+      await handleLearnerInput(action.payload?.prompt || action.label || "Show me something interesting.", {
+        input_source: "text",
+        user_label: action.label || action.payload?.prompt || "Try that",
       });
       return;
     case "clear-scene":
@@ -2229,8 +2733,9 @@ async function handleTutorAction(action = {}) {
       advanceLessonStage();
       break;
     case "show-mistake":
-      await sendTutorMessage(action.payload?.prompt || "Something doesn't look right. Give me a nudge about what to check in the scene.", {
-        userLabel: "Something's off - help me see it",
+      await handleLearnerInput(action.payload?.prompt || "Something doesn't look right. Give me a nudge about what to check in the scene.", {
+        input_source: "text",
+        user_label: "Something's off - help me see it",
       });
       break;
     default:
@@ -2342,6 +2847,7 @@ function bindEvents() {
     sceneApi?.clearFocus?.();
     applyRepresentationDirective({ representationMode: "3d" });
     clearTranscript();
+    hideEvidence();
     renderAnalyticPanels(null);
     renderAssessment(null);
     renderSceneInfo();
@@ -2357,7 +2863,10 @@ function bindEvents() {
       chatInput.value = "";
       updateMathPreview(chatMathPreview, "");
       resizeChatComposer();
+      chatInput.classList.remove("input--awaiting");
     }
+    awaitingLearnerResponse = true;
+    updateComposerState();
   });
   lessonPanelToggle?.addEventListener("click", () => {
     if (!activePlan()) return;
@@ -2435,7 +2944,9 @@ function bindDom() {
   chatInput = document.getElementById("chatInput");
   chatSend = document.getElementById("chatSend");
   chatMathPreview = document.getElementById("chatMathPreview");
+  voiceControl = document.getElementById("voiceControl");
   voiceRecordBtn = document.getElementById("voiceRecordBtn");
+  voiceBars = document.getElementById("voiceBars");
   voiceStatus = document.getElementById("voiceStatus");
   stageRail = document.getElementById("stageRail");
   stageRailProgress = document.getElementById("stageRailProgress");
@@ -2473,6 +2984,7 @@ export function initTutorController(context) {
 
   stageWrapEl = document.querySelector(".stage-wrap");
   if (stageWrapEl) {
+    initEvidencePanel(stageWrapEl);
     initLabelRenderer(stageWrapEl);
   }
 
@@ -2516,13 +3028,40 @@ export function initTutorController(context) {
     }
   });
   chatInput?.addEventListener("input", () => {
+    chatInput.classList.remove("input--awaiting");
     resizeChatComposer();
     updateMathPreview(chatMathPreview, chatInput.value);
   });
 
+  awaitingLearnerResponse = true;
+  updateComposerState();
   resizeChatComposer();
   updateMathPreview(questionMathPreview, questionInput?.value || "");
   updateMathPreview(chatMathPreview, chatInput?.value || "");
+}
+
+export function primeTutorInputs({ text = "", imageFile = null } = {}) {
+  if (questionInput) {
+    questionInput.value = String(text || "");
+    updateMathPreview(questionMathPreview, questionInput.value);
+  }
+  if (imageFile) {
+    setQuestionImageFile(imageFile);
+  }
+}
+
+export function applyGeneratedPlan(scenePlan) {
+  if (!scenePlan) return;
+  setPlan(scenePlan);
+  setQuestionStatus("", "hidden");
+}
+
+export function getQuestionImagePreviewUrl() {
+  return questionImagePreviewUrl;
+}
+
+export async function startTutorTurn(text = "Let's start.") {
+  await handleLearnerInput(text, { input_source: "text" });
 }
 
 export function updateTutorLabels() {
@@ -2532,3 +3071,6 @@ export function updateTutorLabels() {
   electricFieldManager?.update();
   syncUnfoldDrawer();
 }
+
+
+

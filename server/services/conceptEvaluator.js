@@ -69,25 +69,35 @@ function buildEvaluationMessage({ stageGoal, learnerInput, prediction, learnerHi
 }
 
 function normalizeVerdict(parsed = {}) {
-  const verdict = ["CORRECT", "PARTIAL", "STUCK"].includes(parsed.verdict)
+  let verdict = ["CORRECT", "PARTIAL", "STUCK"].includes(parsed.verdict)
     ? parsed.verdict
     : "PARTIAL";
   const confidence = typeof parsed.confidence === "number" && Number.isFinite(parsed.confidence)
     ? Math.max(0, Math.min(1, parsed.confidence))
     : 0.5;
+  let gap = parsed.gap || null;
+  let scene_cue = parsed.scene_cue || null;
+  let tutor_tone = parsed.tutor_tone || "encouraging";
 
-  const effective = verdict === "CORRECT" && confidence < 0.65
-    ? "PARTIAL"
-    : verdict;
+  if (verdict === "CORRECT" && confidence < 0.75) {
+    verdict = "PARTIAL";
+    gap = "Nova was uncertain — checking understanding";
+    scene_cue = null;
+    console.log(`[eval] CORRECT→PARTIAL override, confidence=${confidence}`);
+  }
+
+  if (verdict === "STUCK" && confidence < 0.65) {
+    tutor_tone = "neutral";
+  }
 
   return {
-    verdict: effective,
+    verdict,
     confidence,
     what_was_right: String(parsed.what_was_right || ""),
-    gap: parsed.gap || null,
+    gap,
     misconception_type: parsed.misconception_type || null,
-    scene_cue: parsed.scene_cue || null,
-    tutor_tone: parsed.tutor_tone || "encouraging",
+    scene_cue,
+    tutor_tone,
   };
 }
 

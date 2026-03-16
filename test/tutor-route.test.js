@@ -199,7 +199,10 @@ test("POST /api/tutor includes deterministic completion metadata for correct ans
   const meta = payloads.find((entry) => entry.type === "meta")?.content;
 
   assert.deepEqual(meta?.completionState, { complete: true, reason: "correct-answer" });
-  assert.equal(meta?.checkpoint, null);
+  assert.deepEqual(meta?.checkpoint, {
+    prompt: "Does this look correct?",
+    options: ["yes", "not_sure"],
+  });
   assert.equal(meta?.stageStatus?.canAdvance, false);
 });
 

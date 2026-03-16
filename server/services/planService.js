@@ -4,7 +4,7 @@ import { planFromNova } from "./plan/novaPlan.js";
 import { mergeGeneratedPlan } from "./plan/mergePlan.js";
 import { buildSourceEvidence } from "./plan/sourceEvidence.js";
 import { buildDemoPreset } from "./plan/demoPreset.js";
-import { retrieveLessonExemplar } from "./plan/retrieval.js";
+import { getLastUsedTextModel, getLessonExemplarById, retrieveLessonExemplar } from "./plan/retrieval.js";
 import { buildAnalyticPlan } from "./plan/analytic.js";
 import { buildElectricFieldPlan } from "./plan/electricField.js";
 
@@ -81,17 +81,37 @@ function buildAgentTrace({ sourceSummary, retrieval, usedNovaPlan, usedAnalyticP
       id: "tutor-coach",
       label: "Tutor Coach",
       status: "ready",
-      summary: retrieval?.exemplar
-        ? `Primed with the ${retrieval.exemplar.title.toLowerCase()} pattern for tutoring tone and demo framing.`
+      summary: retrieval?.matchedTitle
+        ? `Primed with the ${retrieval.matchedTitle.toLowerCase()} pattern for tutoring tone and demo framing.`
         : "Ready to coach the learner from the live scene state.",
     },
   ];
 }
 
-export async function generateScenePlan({ questionText = "", imageAsset = null, mode = "guided", sceneSnapshot = null }) {
+export async function generateScenePlan({ questionText = "", imageAsset = null, mode = "guided", sceneSnapshot = null }, emit = async () => {}) {
   const sourceSummary = await interpretQuestionSource({ questionText, imageAsset });
   const workingQuestion = (sourceSummary.cleanedQuestion || questionText || "").trim();
   const retrieval = await retrieveLessonExemplar({ questionText: workingQuestion, sourceSummary });
+  const matchedExemplar = getLessonExemplarById(retrieval.exemplarId);
+  await emit("multimodal_evidence", {
+    input_modality: imageAsset
+      ? (questionText ? "multimodal" : "image")
+      : "text",
+    extracted: {
+      givens: sourceSummary.givens,
+      labels: sourceSummary.labels,
+      relationships: sourceSummary.relationships,
+      diagram_summary: sourceSummary.diagramSummary,
+    },
+    retrieval: {
+      matched_exemplar: retrieval.exemplarId,
+      matched_title: retrieval.matchedTitle,
+      similarity_score: retrieval.score,
+      why: retrieval.why,
+    },
+    nova_model_used: getLastUsedTextModel(),
+    input_had_image: imageAsset != null,
+  });
   let usedNovaPlan = false;
   const analyticInput = buildAnalyticPlannerInput({ questionText, sourceSummary });
   const electricFieldPlan = buildElectricFieldPlan(workingQuestion, sourceSummary);
@@ -103,14 +123,14 @@ export async function generateScenePlan({ questionText = "", imageAsset = null, 
 
   if (!usedAnalyticPlan && !usedElectricFieldPlan) {
     try {
-      const novaPlan = await planFromNova({
-        questionText: workingQuestion,
-        mode,
-        sceneSnapshot,
-        sourceSummary,
-        exemplar: retrieval.exemplar,
-      });
-      usedNovaPlan = true;
+        const novaPlan = await planFromNova({
+          questionText: workingQuestion,
+          mode,
+          sceneSnapshot,
+          sourceSummary,
+          exemplar: matchedExemplar,
+        });
+        usedNovaPlan = true;
 
       mergedPlan = mergeGeneratedPlan({
         baselinePlan,
@@ -128,7 +148,7 @@ export async function generateScenePlan({ questionText = "", imageAsset = null, 
   const demoPreset = buildDemoPreset({
     plan: mergedPlan,
     sourceSummary: effectiveSourceSummary,
-    exemplar: retrieval.exemplar,
+    exemplar: matchedExemplar,
   });
   const agentTrace = buildAgentTrace({
     sourceSummary: effectiveSourceSummary,
@@ -145,15 +165,13 @@ export async function generateScenePlan({ questionText = "", imageAsset = null, 
     demoPreset,
   };
 
-  return {
+  const result = {
     scenePlan,
     sourceEvidence,
     agentTrace,
     demoPreset,
-    retrieval: {
-      strategy: retrieval.strategy,
-      score: retrieval.score,
-      exemplarId: retrieval.exemplar?.id || null,
-    },
+    retrieval,
   };
+  await emit("plan", result);
+  return result;
 }

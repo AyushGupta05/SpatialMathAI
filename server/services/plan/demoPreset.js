@@ -6,14 +6,14 @@ function firstValue(...values) {
 }
 
 export function buildDemoPreset({ plan, sourceSummary, exemplar = null }) {
-  const category = exemplar?.recommendedCategory || "Best of Multimodal Understanding";
+  const category = exemplar?.lesson_type || "geometry";
   const concept = plan?.sceneFocus?.concept || sourceSummary?.cleanedQuestion || "spatial reasoning";
   const insight = plan?.sceneFocus?.judgeSummary || plan?.overview || "Nova turns a worksheet into an interactive 3D lesson.";
 
   return {
     title: firstValue(exemplar?.title, `Nova Prism: ${concept}`),
     scriptBeat: firstValue(
-      exemplar?.scriptBeat,
+      exemplar?.representation_hint,
       `We start from a flat worksheet, turn it into a live 3D lesson, and let Nova coach the learner through build, prediction, and feedback. ${insight}`
     ),
     recommendedCategory: category,

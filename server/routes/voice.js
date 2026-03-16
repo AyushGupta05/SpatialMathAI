@@ -82,6 +82,7 @@ export function createVoiceRoute({
         mode = "coach",
         context = null,
         text = "",
+        requires_evaluation = true,
       } = await c.req.json().catch(() => ({}));
 
       const response = await sessionManager.startTurn({
@@ -91,6 +92,7 @@ export function createVoiceRoute({
         mode,
         context,
         text,
+        requires_evaluation,
       });
       return c.json(response);
     } catch (error) {

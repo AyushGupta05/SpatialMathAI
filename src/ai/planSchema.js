@@ -350,6 +350,7 @@ function normalizeSourceEvidence(sourceEvidence = {}, sourceSummary = {}) {
   return {
     inputMode: normalizeInputMode(sourceEvidence.inputMode, sourceSummary.inputMode || "text"),
     givens: uniqueStrings(sourceEvidence.givens?.length ? sourceEvidence.givens : sourceSummary.givens),
+    labels: uniqueStrings(sourceEvidence.labels?.length ? sourceEvidence.labels : sourceSummary.labels),
     diagramSummary: normalizeString(sourceEvidence.diagramSummary, sourceSummary.diagramSummary || ""),
     conflicts: uniqueStrings(sourceEvidence.conflicts?.length ? sourceEvidence.conflicts : sourceSummary.conflicts),
   };
@@ -462,6 +463,7 @@ function stageActionsForStep(step, suggestionsById, stageIndex = 0) {
 function normalizeLessonStageEntry(stage = {}, index = 0, context = {}) {
   const step = context.buildSteps?.[index] || null;
   const currentMoment = context.learningMoments?.build || {};
+  const learningStage = normalizeLessonStage(stage.learningStage, index === 0 ? "orient" : "build");
   const defaultTargets = step?.highlightObjectIds?.length
     ? step.highlightObjectIds
     : (step?.requiredObjectIds || [])
@@ -492,8 +494,9 @@ function normalizeLessonStageEntry(stage = {}, index = 0, context = {}) {
     return normalizedAction;
   });
 
-  return {
+  const normalizedStage = {
     id: normalizeString(stage.id, step?.id || `stage-${index + 1}`),
+    learningStage,
     title: normalizeString(stage.title, step?.title || `Stage ${index + 1}`),
     goal: normalizeString(stage.goal, step?.instruction || currentMoment.goal || ""),
     tutorIntro: normalizeString(
@@ -515,6 +518,19 @@ function normalizeLessonStageEntry(stage = {}, index = 0, context = {}) {
       "Show me the mistake in this stage and explain what should be different."
     ),
   };
+
+  normalizedStage.requires_evaluation = ["predict", "check", "reflect"].includes(learningStage)
+    || (stage.targetValue !== undefined && stage.targetValue !== null);
+
+  if (
+    ["orient", "challenge"].includes(learningStage)
+    || index === 0
+    || /^(look at|notice|observe|see|watch)\b/i.test(normalizedStage.goal ?? "")
+  ) {
+    normalizedStage.requires_evaluation = false;
+  }
+
+  return normalizedStage;
 }
 
 function defaultLessonStages({ buildSteps = [], suggestionsById = new Map(), learningMoments = {}, sceneFocus = {} }) {

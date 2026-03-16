@@ -1,3 +1,5 @@
+import { hideEvidence } from "../ui/evidencePanel.js";
+
 const API_BASE = "/api";
 
 async function readJsonOrError(response, fallbackMessage) {
@@ -6,9 +8,45 @@ async function readJsonOrError(response, fallbackMessage) {
   throw new Error(payload.error || fallbackMessage);
 }
 
-export async function requestScenePlan({ questionText = "", question = "", imageFile = null, sceneSnapshot = null, mode = "guided" }) {
-  const nextQuestion = String(questionText || question || "");
+function isBinaryLike(value) {
+  return Boolean(value)
+    && typeof value === "object"
+    && typeof value.arrayBuffer === "function";
+}
+
+function normalizePlanRequest(input, imageFileOrCallbacks, callbacksArg) {
+  if (input && typeof input === "object" && !isBinaryLike(input)) {
+    return {
+      questionText: input.questionText || input.question || "",
+      imageFile: input.imageFile || null,
+      sceneSnapshot: input.sceneSnapshot || null,
+      mode: input.mode || "guided",
+      callbacks: input.callbacks || {},
+    };
+  }
+
+  return {
+    questionText: String(input || ""),
+    imageFile: isBinaryLike(imageFileOrCallbacks) ? imageFileOrCallbacks : null,
+    sceneSnapshot: null,
+    mode: "guided",
+    callbacks: !isBinaryLike(imageFileOrCallbacks) ? (imageFileOrCallbacks || callbacksArg || {}) : (callbacksArg || {}),
+  };
+}
+
+export async function requestScenePlan(input, imageFileOrCallbacks = null, callbacksArg = {}) {
+  const {
+    questionText = "",
+    imageFile = null,
+    sceneSnapshot = null,
+    mode = "guided",
+    callbacks = {},
+  } = normalizePlanRequest(input, imageFileOrCallbacks, callbacksArg);
+  const { onMultimodalEvidence, onPlan } = callbacks;
+  const nextQuestion = String(questionText || "");
   let response;
+
+  hideEvidence();
 
   if (imageFile) {
     const formData = new FormData();
@@ -30,16 +68,85 @@ export async function requestScenePlan({ questionText = "", question = "", image
     });
   }
 
-  const payload = await readJsonOrError(response, "Failed to generate scene plan");
-  if (payload?.scenePlan) {
-    payload.scenePlan = {
-      ...payload.scenePlan,
-      sourceEvidence: payload.sourceEvidence || payload.scenePlan.sourceEvidence || null,
-      agentTrace: payload.agentTrace || payload.scenePlan.agentTrace || [],
-      demoPreset: payload.demoPreset || payload.scenePlan.demoPreset || null,
+  if (!response.ok) {
+    return readJsonOrError(response, "Failed to generate scene plan");
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error("Plan stream was unavailable");
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let eventName = null;
+  let dataLines = [];
+  let finalPayload = null;
+
+  const flushEvent = async () => {
+    if (!eventName || !dataLines.length) {
+      eventName = null;
+      dataLines = [];
+      return;
+    }
+    const data = JSON.parse(dataLines.join("\n"));
+    if (eventName === "multimodal_evidence") {
+      await onMultimodalEvidence?.(data);
+    } else if (eventName === "plan") {
+      onPlan?.(data);
+      finalPayload = data;
+    }
+    eventName = null;
+    dataLines = [];
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split(/\r?\n/);
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      if (!line.trim()) {
+        await flushEvent();
+        continue;
+      }
+      if (line.startsWith("event:")) {
+        eventName = line.slice(6).trim();
+        continue;
+      }
+      if (line.startsWith("data:")) {
+        dataLines.push(line.slice(5).trim());
+      }
+    }
+  }
+
+  if (buffer.trim()) {
+    const lines = buffer.split(/\r?\n/);
+    for (const line of lines) {
+      if (line.startsWith("event:")) {
+        eventName = line.slice(6).trim();
+      } else if (line.startsWith("data:")) {
+        dataLines.push(line.slice(5).trim());
+      }
+    }
+  }
+  await flushEvent();
+
+  if (!finalPayload) {
+    throw new Error("Plan stream ended before a plan event was received");
+  }
+
+  if (finalPayload?.scenePlan) {
+    finalPayload.scenePlan = {
+      ...finalPayload.scenePlan,
+      sourceEvidence: finalPayload.sourceEvidence || finalPayload.scenePlan.sourceEvidence || null,
+      agentTrace: finalPayload.agentTrace || finalPayload.scenePlan.agentTrace || [],
+      demoPreset: finalPayload.demoPreset || finalPayload.scenePlan.demoPreset || null,
     };
   }
-  return payload;
+  return finalPayload;
 }
 
 export async function evaluateBuild({ plan, sceneSnapshot, currentStepId = null }) {
@@ -51,11 +158,35 @@ export async function evaluateBuild({ plan, sceneSnapshot, currentStepId = null 
   return readJsonOrError(response, "Failed to evaluate build");
 }
 
-export async function askTutor({ plan, sceneSnapshot, sceneContext = null, learningState, userMessage, contextStepId, onChunk, onAssessment }) {
+export async function askTutor({
+  plan,
+  sceneSnapshot,
+  sceneContext = null,
+  learningState,
+  userMessage,
+  contextStepId,
+  onChunk,
+  onAssessment,
+  onMeta,
+  onDone,
+  input_source = "text",
+  requires_evaluation = true,
+  hint_state = null,
+}) {
   const response = await fetch(`${API_BASE}/tutor`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ plan, sceneSnapshot, sceneContext, learningState, userMessage, contextStepId }),
+    body: JSON.stringify({
+      plan,
+      sceneSnapshot,
+      sceneContext,
+      learningState,
+      userMessage,
+      contextStepId,
+      input_source,
+      requires_evaluation,
+      hint_state,
+    }),
   });
 
   if (!response.ok) {
@@ -86,10 +217,19 @@ export async function askTutor({ plan, sceneSnapshot, sceneContext = null, learn
       }
       if (payload.type === "meta" && payload.content) {
         latestMeta = payload.content;
+        await onMeta?.(latestMeta);
       }
       if (payload.type === "assessment" && payload.content) {
         latestAssessment = payload.content;
-        onAssessment?.(latestAssessment);
+        await onAssessment?.(latestAssessment);
+      }
+      if (payload.type === "done") {
+        await onDone?.({
+          text: fullText,
+          assessment: latestAssessment,
+          meta: latestMeta,
+          done: payload,
+        });
       }
       if (payload.type === "error") {
         throw new Error(payload.content || "Tutor stream error");
@@ -160,6 +300,7 @@ export async function startVoiceSessionTurn({
   mode = "coach",
   context = null,
   text = "",
+  requires_evaluation = true,
 }) {
   const response = await fetch(`${API_BASE}/voice/session/${encodeURIComponent(sessionId)}/start`, {
     method: "POST",
@@ -170,6 +311,7 @@ export async function startVoiceSessionTurn({
       mode,
       context,
       text,
+      requires_evaluation,
     }),
   });
   return readJsonOrError(response, "Failed to start the voice session");

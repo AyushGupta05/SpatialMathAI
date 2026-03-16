@@ -208,6 +208,15 @@ export function createVoiceSessionManager(deps = {}) {
     }
     session.currentTurn = null;
 
+    if (result.assessment || result.conceptVerdict) {
+      publish(session, {
+        type: "assessment",
+        verdict: result.conceptVerdict?.verdict || null,
+        assessment: result.assessment || null,
+        conceptVerdict: result.conceptVerdict || null,
+      });
+    }
+
     publish(session, {
       type: "done",
       conversationId: session.id,
@@ -218,6 +227,7 @@ export function createVoiceSessionManager(deps = {}) {
       actions: Array.isArray(result.actions) ? result.actions : [],
       focusTargets: Array.isArray(result.focusTargets) ? result.focusTargets : [],
       checkpoint: result.checkpoint || null,
+      nextLearningStage: result.nextLearningStage || null,
       stageStatus: result.stageStatus || null,
       completionState: result.completionState || null,
       sceneDirective: result.sceneDirective || null,
@@ -386,6 +396,7 @@ export function createVoiceSessionManager(deps = {}) {
     mode = "coach",
     context = null,
     text = "",
+    requires_evaluation = true,
   }) {
     const session = ensureSession(sessionId);
     if (session.currentTurn && !session.currentTurn.closed) {
@@ -409,7 +420,10 @@ export function createVoiceSessionManager(deps = {}) {
       playbackMode,
       voiceId,
       mode,
-      context,
+      context: {
+        ...(context || {}),
+        requires_evaluation,
+      },
       userText,
       inputTranscript: "",
       assistantPreviewText: "",

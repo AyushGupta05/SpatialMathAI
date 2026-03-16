@@ -3,12 +3,19 @@ import assert from "node:assert/strict";
 
 import { createPlanRoute } from "../server/routes/plan.js";
 
+function parseSsePayloads(bodyText) {
+  return bodyText
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith("data: "))
+    .map((line) => JSON.parse(line.slice(6)));
+}
+
 test("POST /api/plan multipart requests pass image and scene snapshot to the plan generator", async () => {
   let capturedPayload = null;
   const planRoute = createPlanRoute({
-    planGenerator: async (payload) => {
+    planGenerator: async (payload, emit) => {
       capturedPayload = payload;
-      return {
+      await emit("plan", {
         scenePlan: {
           problem: {
             question: payload.questionText || "diagram only",
@@ -34,7 +41,7 @@ test("POST /api/plan multipart requests pass image and scene snapshot to the pla
           scriptBeat: "Diagram to 3D lesson",
           recommendedCategory: "Best of Multimodal Understanding",
         },
-      };
+      });
     },
   });
 
@@ -48,7 +55,7 @@ test("POST /api/plan multipart requests pass image and scene snapshot to the pla
     method: "POST",
     body: form,
   });
-  const payload = await response.json();
+  const payload = parseSsePayloads(await response.text()).at(-1);
 
   assert.equal(response.status, 200);
   assert.equal(payload.scenePlan.problem.question, "Interpret this diagram");

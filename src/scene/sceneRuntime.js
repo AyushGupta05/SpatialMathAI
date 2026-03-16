@@ -7,6 +7,8 @@ import {
   sceneObjectToLegacyItem,
 } from "./schema.js";
 
+let firstObjectEmitted = false;
+
 function objectLabelForIndex(index) {
   let value = Math.max(0, index);
   let label = "";
@@ -69,6 +71,10 @@ export function createSceneRuntime({ world }) {
       mesh.userData.label = normalized.label;
     }
     world.scene.add(mesh);
+    if (!firstObjectEmitted) {
+      firstObjectEmitted = true;
+      document.dispatchEvent(new CustomEvent("scene:first-object"));
+    }
     registerMesh(mesh, normalized, options.reason || "add");
     if (options.select) {
       setSelection(mesh);

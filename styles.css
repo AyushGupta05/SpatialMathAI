@@ -560,6 +560,65 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 5px; }
 }
 .agent-trace-status.is-fallback { color: #ffd966; }
 .agent-trace-status.is-muted { color: var(--muted); }
+.evidence-panel {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  z-index: 6;
+  width: min(420px, calc(100% - 36px));
+}
+.evidence-panel-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 128px) minmax(0, 1fr);
+  gap: 12px;
+}
+.evidence-panel-column {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+.evidence-panel-list {
+  margin: 0;
+  padding-left: 16px;
+}
+.score-bar {
+  width: 100%;
+  height: 6px;
+  background: #e5e7eb;
+  border-radius: 3px;
+  margin: 4px 0;
+}
+.score-bar-fill {
+  height: 100%;
+  background: var(--accent-color, #6366f1);
+  border-radius: 3px;
+}
+.badge-info {
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 20px;
+}
+.badge-muted {
+  background: #f3f4f6;
+  color: #6b7280;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 20px;
+}
+.tag {
+  width: fit-content;
+  font-size: 11px;
+  border: 1px solid #e5e7eb;
+  padding: 1px 6px;
+  border-radius: 20px;
+}
+.label-muted {
+  font-size: 12px;
+  color: #6b7280;
+  margin: 0 0 4px;
+}
 .plan-summary {
   padding: 10px 12px; border-radius: 8px;
   background: rgba(122, 247, 228, 0.08); border: 1px solid rgba(122, 247, 228, 0.2);
@@ -1617,9 +1676,35 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 5px; }
 .chat-input:focus {
   outline: none;
 }
+.input--awaiting {
+  border-left: 2px solid transparent;
+  animation: awaiting-pulse 2s ease-in-out infinite;
+}
+@keyframes awaiting-pulse {
+  0%, 100% {
+    border-left-color: var(--accent-color, #6366f1);
+  }
+  50% {
+    border-left-color: transparent;
+  }
+}
 .chat-input:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+.voice-control {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+}
+.mic-ring {
+  position: absolute;
+  inset: 1px;
+  pointer-events: none;
 }
 .chat-send-btn {
   width: 34px;
@@ -1639,6 +1724,67 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 5px; }
 .chat-send-btn:disabled {
   opacity: 0.3;
   cursor: not-allowed;
+}
+.voice--listening .mic-ring {
+  animation: voice-ring-pulse 1.5s ease-in-out infinite;
+  border: 2px solid var(--color-info, #3b82f6);
+  border-radius: 50%;
+}
+@keyframes voice-ring-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.15); opacity: 0.6; }
+}
+.voice--processing .mic-ring {
+  border: 2px solid #9ca3af;
+  border-radius: 50%;
+}
+.voice-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 16px;
+}
+.voice-bars span {
+  display: inline-block;
+  width: 3px;
+  background: var(--color-purple, #8b5cf6);
+  border-radius: 2px;
+  animation: bar-bounce 0.8s ease-in-out infinite;
+}
+.voice-bars span:nth-child(1) { height: 8px; }
+.voice-bars span:nth-child(2) {
+  height: 14px;
+  animation-delay: 0.15s;
+}
+.voice-bars span:nth-child(3) {
+  height: 8px;
+  animation-delay: 0.3s;
+}
+@keyframes bar-bounce {
+  0%, 100% { transform: scaleY(0.5); }
+  50% { transform: scaleY(1.2); }
+}
+.beat {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+  color: var(--color-muted, #6b7280);
+  font-size: 12px;
+}
+.beat-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e5e7eb;
+  flex-shrink: 0;
+  transition: background 0.3s;
+}
+.beat.done .beat-dot {
+  background: var(--accent-color, #6366f1);
+}
+.beat.done {
+  color: var(--color-text, #111827);
 }
 
 /* ============ 3D LABELS (CSS2DRenderer) ============ */
@@ -1723,6 +1869,118 @@ input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 5px; }
 }
 
 .hidden { display: none !important; }
+
+.evidence-panel {
+  overflow: hidden;
+  transition: max-height 0.4s ease, opacity 0.3s ease;
+  max-height: 0;
+  opacity: 0;
+}
+
+.evidence--visible {
+  max-height: 600px;
+  opacity: 1;
+}
+
+.evidence--hidden {
+  max-height: 0;
+  opacity: 0;
+  pointer-events: none;
+  padding: 0;
+  margin: 0;
+}
+
+.formula-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-tertiary, #9ca3af);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  display: block;
+  margin-bottom: 6px;
+}
+
+.formula-display {
+  overflow-x: auto;
+}
+
+.solution-step {
+  padding: 10px 12px;
+  border-left: 2px solid var(--color-border-secondary, #e5e7eb);
+  margin: 8px 0;
+  border-radius: 0 6px 6px 0;
+}
+
+.solution-step .step-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-tertiary, #9ca3af);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  display: block;
+  margin-bottom: 2px;
+}
+
+.step-description {
+  font-size: 13px;
+  color: var(--color-text-secondary, #6b7280);
+  display: block;
+  margin-bottom: 6px;
+}
+
+.step-math {
+  overflow-x: auto;
+}
+
+.step-result {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-primary, var(--text));
+  display: block;
+  margin-top: 4px;
+}
+
+.solution-answer {
+  padding: 12px 14px;
+  background: var(--color-background-success-subtle, rgba(34, 197, 94, 0.08));
+  border: 0.5px solid var(--color-border-success, rgba(34, 197, 94, 0.2));
+  border-radius: 8px;
+  margin-top: 12px;
+}
+
+.answer-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-success, #15803d);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  display: block;
+  margin-bottom: 6px;
+}
+
+.answer-math {
+  font-size: 16px;
+  overflow-x: auto;
+}
+
+.solution-prose {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--color-text-secondary, #6b7280);
+  margin: 0 0 8px;
+}
+
+.formula-display .katex-display,
+.step-math .katex-display,
+.answer-math .katex-display {
+  margin: 0.35rem 0;
+}
+
+.formula-display .katex,
+.step-math .katex,
+.answer-math .katex {
+  font-size: 1em;
+}
 @keyframes blink { 50% { opacity: 0; } }
 
 /* ============ RESPONSIVE ============ */
