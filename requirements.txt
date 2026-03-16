@@ -1,3 +1,4 @@
-# Python dependencies used by the scripts in tools/
-numpy==2.4.2
+# Python dependencies for the repo's utility scripts in tools/
+# Main app dependencies are installed with `npm install`.
+numpy>=1.23.5,<2.0.0
 tensorflow-cpu==2.16.2

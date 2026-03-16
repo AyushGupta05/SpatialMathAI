@@ -11,7 +11,7 @@ node_modules/
 .env.local
 .playwright-cli/
 output/
-docs/submission/
+docs/
 .codex-runtime/
 output.txt
 test_output.txt

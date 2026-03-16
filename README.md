@@ -1,32 +1,12 @@
-# SpatialMath — AI Spatial Reasoning Tutor
+# SpatialMath Nova
 
-SpatialMath turns flat spatial-maths prompts into interactive 3D lessons that students can inspect, manipulate, and talk to.
-
-The app is built for the Amazon Nova hackathon story:
-- `multimodal understanding`: combine text prompts and uploaded worksheet diagrams
-- `voice coaching`: generate spoken tutoring responses with a Sonic-backed voice path and graceful fallback
-- `agentic lesson flow`: explicit source, planning, evaluation, and coaching stages
-
-## What the product does
-
-- Converts a maths prompt or worksheet diagram into a guided 3D lesson scene
-- Shows extracted givens, diagram evidence, and an agent trace before the build starts
-- Walks learners through `Orient -> Build -> Predict -> Check -> Reflect -> Challenge`
-- Evaluates the live scene as the learner builds and adjusts objects
-- Supports typed follow-ups plus push-to-talk voice coaching
-
-## Stack
-
-- Browser UI with `three.js`
-- Node.js + Hono server
-- Amazon Bedrock runtime client for Nova planning, tutoring, voice, and retrieval
-- Optional webcam-based hand tracking for spatial interaction
+SpatialMath Nova is an AI-powered spatial reasoning tutor that turns maths and physics problems into interactive 3D scenes students can explore. Learners can enter a question, upload a worksheet image, or paste a screenshot, and the system generates a visual scene that helps them understand vectors, planes, geometry, and other spatial concepts more intuitively. It combines adaptive tutoring, voice interaction, and gesture-based manipulation so students can see the structure of a problem instead of trying to imagine it from a flat diagram.
 
 ## Local setup
 
 ### Requirements
 
-- Node.js  20+
+- Node.js 20+
 - npm
 - Webcam for hand tracking
 - Microphone for push-to-talk voice mode
@@ -35,37 +15,59 @@ The app is built for the Amazon Nova hackathon story:
 
 ```bash
 npm install
+pip install -r requirements.txt
 ```
 
 ### Environment
 
-Create `.env.local` in the project root.
+Create `.env.local` in the project root:
 
 ```env
 AWS_REGION=us-east-1
 AWS_ACCESS_KEY_ID=your_key
 AWS_SECRET_ACCESS_KEY=your_secret
 AWS_SESSION_TOKEN=your_session_token
-
-# Optional overrides
-NOVA_TEXT_MODEL_ID=us.amazon.nova-2-lite-v1:0
-NOVA_SONIC_MODEL_ID=amazon.nova-2-sonic-v1:0
-NOVA_EMBED_MODEL_ID=amazon.nova-2-multimodal-embeddings-v1:0
 ```
 
 The app still runs without Bedrock credentials, but multimodal planning, Sonic voice, and embedding-backed retrieval will fall back to the local non-AWS path.
 
-## Run
+## Architecture
 
-```bash
-npm run dev
-```
+### High-level system design
 
-Then open [http://localhost:3000/index.html](http://localhost:3000/index.html).
-
-## Quality checks
-
-```bash
-npm run lint
-npm test
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│                           Frontend                              │
+│                     (Vanilla JS + Three.js)                     │
+│                                                                 │
+│  - Question input (text / image / screenshot)                   │
+│  - 3D scene rendering                                           │
+│  - Tutor panel                                                  │
+│  - Voice UI                                                     │
+│  - Hand tracking                                                │
+│  - KaTeX rendering                                              │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              │ HTTP / SSE
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                            Backend                              │
+│                      (Node.js + Hono API)                       │
+│                                                                 │
+│  - Request validation                                           │
+│  - Amazon Bedrock integration                                   │
+│  - Model orchestration / fallback                               │
+│  - SceneSpec generation                                         │
+│  - Tutor streaming                                              │
+│  - Voice pipeline coordination                                  │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                       Amazon Bedrock                            │
+│                                                                 │
+│  - Amazon Nova Multimodal Embeddings                            │
+│  - Amazon Nova Lite                                             │
+│  - Amazon Nova Sonic                                            │
+└─────────────────────────────────────────────────────────────────┘
 ```
